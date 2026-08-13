@@ -231,7 +231,13 @@ func (s *Simulation) defaultLimit() func() bool {
 		return nil
 	case model.ModeEvent:
 		if s.cfg.MaxTime > 0 {
-			return func() bool { return s.world.Clock.Time() >= s.cfg.MaxTime }
+			return func() bool {
+				e, ok := s.world.Events.Peek()
+				if !ok {
+					return true
+				}
+				return e.Time >= s.cfg.MaxTime
+			}
 		}
 		return nil
 	default:
@@ -272,6 +278,15 @@ func (s *Simulation) run(ctx context.Context, limit func() bool, done chan struc
 		}
 		s.mu.Unlock()
 
+		if limit != nil && limit() {
+			s.mu.Lock()
+			if s.state == StateRunning {
+				s.state = StateCompleted
+			}
+			s.mu.Unlock()
+			break
+		}
+
 		more, err := s.exec.step(runCtx, s.world)
 		if err != nil {
 			runErr = err
@@ -283,8 +298,6 @@ func (s *Simulation) run(ctx context.Context, limit func() bool, done chan struc
 			break
 		}
 
-		s.steps.Add(1)
-
 		if !more {
 			s.mu.Lock()
 			if s.state == StateRunning {
@@ -293,14 +306,8 @@ func (s *Simulation) run(ctx context.Context, limit func() bool, done chan struc
 			s.mu.Unlock()
 			break
 		}
-		if limit != nil && limit() {
-			s.mu.Lock()
-			if s.state == StateRunning {
-				s.state = StateCompleted
-			}
-			s.mu.Unlock()
-			break
-		}
+
+		s.steps.Add(1)
 	}
 
 	s.mu.Lock()

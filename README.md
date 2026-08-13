@@ -4,10 +4,11 @@ An open, general-purpose distributed simulation runtime written in Go for
 executing deterministic, extensible simulations locally or across a scalable
 worker cluster.
 
-> **Status: Phase 1** — core engine (entities, SoA components, events, clock,
-> deterministic randomness, and the simulation runtime) plus the `CounterWorld`
-> test model. Later phases add the discrete-event engine, parallel execution,
-> snapshots, persistence, REST API, distributed workers, and observability.
+> **Status: Phase 2** — core engine (entities, SoA components, events, clock,
+> deterministic randomness, and the simulation runtime), the discrete-event
+> engine (priority event queue, immediate/delayed/prioritized scheduling), and
+> the `CounterWorld` test model. Later phases add parallel execution, snapshots,
+> persistence, REST API, distributed workers, and observability.
 
 ## What this is
 
