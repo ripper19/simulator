@@ -1,0 +1,24 @@
+# Agent operating guide — local only, never committed or pushed
+agents.md
+
+# Binaries
+/bin/
+*.exe
+*.test
+*.out
+
+# Go build/test artifacts
+coverage.*
+*.prof
+*.pprof
+
+# Local config / secrets
+.env
+.env.*
+*.local
+
+# Editor/OS noise
+.DS_Store
+.idea/
+.vscode/
+*.swp
