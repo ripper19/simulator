@@ -21,12 +21,12 @@ func (s *RandomStreams) Seed() uint64 { return s.seed }
 // Stream returns a stream derived from the seed and the given key parts. The
 // same key always yields the same stream; different keys yield independent
 // streams.
-func (s *RandomStreams) Stream(keys ...string) *rng.RNG {
+func (s *RandomStreams) Stream(keys ...string) rng.RNG {
 	return rng.Derive(s.seed, keys...)
 }
 
 // StreamU64 returns a stream derived from the seed and a raw uint64 key, for
 // hot paths such as per-entity streams.
-func (s *RandomStreams) StreamU64(stream uint64) *rng.RNG {
+func (s *RandomStreams) StreamU64(stream uint64) rng.RNG {
 	return rng.DeriveU64(s.seed, stream)
 }

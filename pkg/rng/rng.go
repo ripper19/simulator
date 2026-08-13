@@ -25,14 +25,15 @@ type RNG struct {
 }
 
 // New returns an RNG seeded with the given value. Seeding with 0 is valid;
-// splitmix64 will still produce a well-distributed sequence.
-func New(seed uint64) *RNG {
-	return &RNG{state: seed}
+// splitmix64 will still produce a well-distributed sequence. RNG is a value
+// type: it is a single uint64, so creating and copying it allocates nothing.
+func New(seed uint64) RNG {
+	return RNG{state: seed}
 }
 
 // State returns the current internal state, allowing a stream to be snapshotted
 // and restored later.
-func (r *RNG) State() uint64 { return r.state }
+func (r RNG) State() uint64 { return r.state }
 
 // Uint64 returns the next 64-bit random value and advances the stream.
 func (r *RNG) Uint64() uint64 {
@@ -79,7 +80,7 @@ func (r *RNG) Float64() float64 {
 // Split returns a new child stream derived from the current stream state.
 // Because it consumes state, Split must be called in a deterministic order.
 // Prefer Derive or DeriveU64 when an order-independent named stream is needed.
-func (r *RNG) Split() *RNG {
+func (r *RNG) Split() RNG {
 	return New(r.Uint64())
 }
 
@@ -87,7 +88,7 @@ func (r *RNG) Split() *RNG {
 // seed and a sequence of key parts. The same (seed, keys...) always yields the
 // same stream, and different keys yield unrelated streams. This is
 // order-independent, so it is safe to derive per-entity or per-system streams.
-func Derive(seed uint64, keys ...string) *RNG {
+func Derive(seed uint64, keys ...string) RNG {
 	h := fnv.New64a()
 	var b [8]byte
 	binary.LittleEndian.PutUint64(b[:], seed)
@@ -102,7 +103,7 @@ func Derive(seed uint64, keys ...string) *RNG {
 // DeriveU64 returns an independent stream derived from a master seed and a
 // raw uint64 stream identifier. It avoids string hashing overhead, making it
 // suitable for hot paths such as per-entity streams.
-func DeriveU64(seed, stream uint64) *RNG {
+func DeriveU64(seed, stream uint64) RNG {
 	return New(mix64(seed) ^ mix64(stream+golden))
 }
 

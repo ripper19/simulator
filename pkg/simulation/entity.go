@@ -37,6 +37,7 @@ type EntityManager struct {
 	free     []uint32   // recycled indices
 	next     uint32     // next index to allocate when free is empty
 	count    int
+	bump     func() // optional structural-revision callback
 }
 
 // NewEntityManager returns an empty entity manager.
@@ -72,6 +73,9 @@ func (m *EntityManager) Create() EntityID {
 	m.dense = append(m.dense, id)
 	m.sparse[index] = int32(pos + 1)
 	m.count++
+	if m.bump != nil {
+		m.bump()
+	}
 	return id
 }
 
@@ -111,6 +115,9 @@ func (m *EntityManager) Destroy(id EntityID) bool {
 	m.sparse[idx] = 0
 	m.free = append(m.free, idx)
 	m.count--
+	if m.bump != nil {
+		m.bump()
+	}
 	return true
 }
 

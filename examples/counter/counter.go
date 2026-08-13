@@ -4,7 +4,9 @@
 //
 // CounterWorld creates N entities. Each tick, every entity adds a deterministic
 // random value to its accumulator. The model contains no domain meaning; it
-// exists only to provide a predictable, measurable workload.
+// exists only to provide a predictable, measurable workload. It is expressed as
+// a SystemModel so the engine can parallelize the per-tick increment across
+// entities while preserving determinism.
 package counter
 
 import (
@@ -26,8 +28,8 @@ type Value struct{ V uint64 }
 // RandState is the per-entity random stream state component.
 type RandState struct{ State uint64 }
 
-// CounterWorld is the model. It keeps its component IDs cached after
-// Initialize so Step performs no registry lookups.
+// CounterWorld is the model. It keeps its component IDs and columns cached
+// after Initialize so systems perform no registry lookups during a tick.
 type CounterWorld struct {
 	// N is the number of entities to create.
 	N int
@@ -35,6 +37,8 @@ type CounterWorld struct {
 	// It defaults to 1000 when zero.
 	IncrementMax uint64
 
+	valueID  simulation.ComponentID
+	randID   simulation.ComponentID
 	valueCol *simulation.Column[Value]
 	randCol  *simulation.Column[RandState]
 }
@@ -53,8 +57,8 @@ func (m *CounterWorld) Metadata() model.Metadata {
 // Initialize creates N entities, each with a zero value and a per-entity
 // random stream derived from the simulation seed.
 func (m *CounterWorld) Initialize(ctx context.Context, w *simulation.World) error {
-	_, m.valueCol = simulation.RegisterComponent[Value](w.Components, "counter.value")
-	_, m.randCol = simulation.RegisterComponent[RandState](w.Components, "counter.rand")
+	m.valueID, m.valueCol = simulation.RegisterComponent[Value](w.Components, "counter.value")
+	m.randID, m.randCol = simulation.RegisterComponent[RandState](w.Components, "counter.rand")
 
 	seed := w.Random.Seed()
 	for i := 0; i < m.N; i++ {
@@ -66,33 +70,59 @@ func (m *CounterWorld) Initialize(ctx context.Context, w *simulation.World) erro
 	return nil
 }
 
-// Step advances every entity's random stream and adds the resulting value to
-// its accumulator.
-func (m *CounterWorld) Step(ctx context.Context, w *simulation.World) error {
-	max := m.IncrementMax
+// Systems returns the single increment system.
+func (m *CounterWorld) Systems() []simulation.System {
+	return []simulation.System{&counterSystem{m: m}}
+}
+
+// counterSystem advances every entity's random stream and adds the resulting
+// value to its accumulator. It is fully per-entity independent, so the
+// scheduler may shard it across workers without changing the result.
+type counterSystem struct {
+	m *CounterWorld
+}
+
+func (s *counterSystem) Name() string { return "counter.increment" }
+
+func (s *counterSystem) Reads() []simulation.ComponentID {
+	return []simulation.ComponentID{s.m.valueID, s.m.randID}
+}
+
+func (s *counterSystem) Writes() []simulation.ComponentID {
+	return []simulation.ComponentID{s.m.valueID, s.m.randID}
+}
+
+func (s *counterSystem) Run(ctx context.Context, w *simulation.World, shard []simulation.EntityID) error {
+	max := s.m.IncrementMax
 	if max == 0 {
 		max = 1000
 	}
-	w.Entities.Each(func(e simulation.EntityID) {
-		rs := m.randCol.MustGet(e)
+	for _, e := range shard {
+		rs, ok := s.m.randCol.GetShard(e)
+		if !ok {
+			continue
+		}
 		r := rng.New(rs.State)
 		inc := r.Uint64n(max)
-		v := m.valueCol.MustGet(e)
+		v, _ := s.m.valueCol.GetShard(e)
 		v.V += inc
-		m.valueCol.Set(e, v)
-		m.randCol.Set(e, RandState{State: r.State()})
-	})
+		s.m.valueCol.SetShard(e, v)
+		s.m.randCol.SetShard(e, RandState{State: r.State()})
+	}
 	return nil
 }
 
 // Fingerprint returns a 64-bit hash of the world state (entity IDs and their
 // accumulated values) in deterministic order. Two runs with the same seed and
-// configuration must produce the same fingerprint.
+// configuration must produce the same fingerprint regardless of worker count.
 func (m *CounterWorld) Fingerprint(w *simulation.World) uint64 {
 	h := fnv.New64a()
 	var b [16]byte
 	w.Entities.Each(func(e simulation.EntityID) {
-		v := m.valueCol.MustGet(e)
+		v, ok := m.valueCol.Get(e)
+		if !ok {
+			return
+		}
 		binary.LittleEndian.PutUint64(b[0:8], uint64(e))
 		binary.LittleEndian.PutUint64(b[8:16], v.V)
 		h.Write(b[:])
