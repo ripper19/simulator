@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/ripper19/simulator/internal/runner"
+	"github.com/ripper19/simulator/pkg/simulation"
 )
 
 // apiError is a structured error returned to clients as JSON.
@@ -30,6 +31,8 @@ func writeError(w http.ResponseWriter, err error) {
 		writeJSON(w, ae.Status, map[string]any{"error": ae})
 	case errors.Is(err, runner.ErrNotFound):
 		writeJSON(w, http.StatusNotFound, map[string]any{"error": apiError{Status: http.StatusNotFound, Code: "not_found", Message: err.Error()}})
+	case errors.Is(err, simulation.ErrAlreadyRunning) || errors.Is(err, simulation.ErrNotRunning):
+		writeJSON(w, http.StatusConflict, map[string]any{"error": apiError{Status: http.StatusConflict, Code: "conflict", Message: err.Error()}})
 	default:
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": apiError{Status: http.StatusInternalServerError, Code: "internal", Message: err.Error()}})
 	}

@@ -40,6 +40,9 @@ SELECT id, model_id, model_version, seed, mode, status, config, created_at, upda
 FROM simulations
 ORDER BY created_at DESC;
 
+-- name: DeleteSimulation :exec
+DELETE FROM simulations WHERE id = $1;
+
 -- name: UpdateSimulationStatus :one
 UPDATE simulations
 SET status = $2,

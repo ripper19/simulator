@@ -51,6 +51,15 @@ func (q *Queries) CreateSimulation(ctx context.Context, arg CreateSimulationPara
 	return i, err
 }
 
+const deleteSimulation = `-- name: DeleteSimulation :exec
+DELETE FROM simulations WHERE id = $1
+`
+
+func (q *Queries) DeleteSimulation(ctx context.Context, id string) error {
+	_, err := q.db.Exec(ctx, deleteSimulation, id)
+	return err
+}
+
 const getModel = `-- name: GetModel :one
 SELECT id, name, version, description, mode, config_schema, runtime_compat, author, created_at
 FROM models

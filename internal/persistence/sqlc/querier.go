@@ -10,6 +10,7 @@ import (
 
 type Querier interface {
 	CreateSimulation(ctx context.Context, arg CreateSimulationParams) (Simulation, error)
+	DeleteSimulation(ctx context.Context, id string) error
 	GetModel(ctx context.Context, arg GetModelParams) (Model, error)
 	GetSimulation(ctx context.Context, id string) (Simulation, error)
 	GetSnapshot(ctx context.Context, id string) (Snapshot, error)

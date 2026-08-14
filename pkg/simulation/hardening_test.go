@@ -150,3 +150,59 @@ func TestEventInPastRejected(t *testing.T) {
 		t.Fatalf("state = %s, want failed", sim.State())
 	}
 }
+
+// blockingModel's system blocks until the run context is cancelled, then
+// returns ctx.Err() — deterministically reproducing the Stop-mid-step race
+// where a step surfaces context.Canceled.
+type blockingModel struct {
+	accID  ComponentID
+	accCol *Column[int]
+}
+
+func (m *blockingModel) Metadata() model.Metadata {
+	return model.Metadata{ID: "blocking", Name: "Blocking", Version: "1", Mode: model.ModeTick}
+}
+
+func (m *blockingModel) Initialize(ctx context.Context, w *World) error {
+	m.accID, m.accCol = RegisterComponent[int](w.Components, "block.acc")
+	for i := 0; i < 1000; i++ {
+		m.accCol.Set(w.Entities.Create(), 0)
+	}
+	return nil
+}
+
+func (m *blockingModel) Systems() []System {
+	return []System{&blockingSystem{m: m}}
+}
+
+type blockingSystem struct{ m *blockingModel }
+
+func (s *blockingSystem) Name() string          { return "block" }
+func (s *blockingSystem) Reads() []ComponentID  { return []ComponentID{s.m.accID} }
+func (s *blockingSystem) Writes() []ComponentID { return []ComponentID{s.m.accID} }
+func (s *blockingSystem) Run(ctx context.Context, w *World, shard []EntityID) error {
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+func TestStopMidStepIsStoppedNotFailed(t *testing.T) {
+	m := &blockingModel{}
+	sim, err := New(context.Background(), Config{ID: "s", Seed: 1, Mode: model.ModeTick, Workers: 2}, m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sim.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	// Give the run loop time to enter the blocking step.
+	time.Sleep(20 * time.Millisecond)
+	if err := sim.Stop(); err != nil {
+		t.Fatal(err)
+	}
+	if err := sim.Wait(); err != nil {
+		t.Fatalf("Stop surfaced an error (%v); a cancellation mid-step must not be a failure (state=%s)", err, sim.State())
+	}
+	if sim.State() != StateStopped {
+		t.Fatalf("state = %s, want stopped", sim.State())
+	}
+}

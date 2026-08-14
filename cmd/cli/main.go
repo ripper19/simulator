@@ -46,8 +46,12 @@ func main() {
 		err = doMetrics(base, args)
 	case "snapshot":
 		err = doSnapshot(base, args)
+	case "restore":
+		err = doRestore(base, args)
 	case "replay":
 		err = doAction(base, args, "replay")
+	case "model":
+		err = doModel(base, args)
 	case "help", "-h", "--help":
 		usage()
 	default:
@@ -66,6 +70,7 @@ func usage() {
 
 commands:
   models                     list registered models
+  model <id>                 inspect a model
   create --model <id> [--seed n] [--n n]   create a simulation
   start   <id>               start a simulation
   pause   <id>               pause a simulation
@@ -75,6 +80,7 @@ commands:
   status  <id>               show simulation state
   metrics <id>               show simulation metrics
   snapshot <id>              capture a snapshot
+  restore  <id> <file>       restore a snapshot from a JSON file
   replay  <id>               replay a simulation from seed
 
 env: SIM_URL (default http://127.0.0.1:8080)`)
@@ -82,6 +88,28 @@ env: SIM_URL (default http://127.0.0.1:8080)`)
 
 func doModels(base string, args []string) error {
 	return getAndPrint(base + "/api/v1/models")
+}
+
+func doModel(base string, args []string) error {
+	if len(args) < 1 {
+		return fmt.Errorf("model requires a model id")
+	}
+	return getAndPrint(base + "/api/v1/models/" + args[0])
+}
+
+func doRestore(base string, args []string) error {
+	id, err := requireID(args, "restore")
+	if err != nil {
+		return err
+	}
+	if len(args) < 2 {
+		return fmt.Errorf("restore requires a snapshot file")
+	}
+	data, err := os.ReadFile(args[1])
+	if err != nil {
+		return err
+	}
+	return postAndPrint(fmt.Sprintf("%s/api/v1/simulations/%s/restore", base, id), data)
 }
 
 func doCreate(base string, args []string) error {

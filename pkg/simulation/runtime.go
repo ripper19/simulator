@@ -368,6 +368,18 @@ func (s *Simulation) run(ctx context.Context, limit func() bool, done chan struc
 
 		more, err := s.exec.step(runCtx, s.world)
 		if err != nil {
+			if runCtx.Err() != nil {
+				// The run context was cancelled (Stop or external cancellation)
+				// while a step was in flight; the scheduler surfaced the
+				// cancellation as an error. This is a stop, not a model failure.
+				s.mu.Lock()
+				if s.state == StateRunning || s.state == StatePaused {
+					s.state = StateStopped
+					s.cond.Broadcast()
+				}
+				s.mu.Unlock()
+				break
+			}
 			runErr = err
 			s.mu.Lock()
 			s.state = StateFailed

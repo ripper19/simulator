@@ -167,6 +167,12 @@ func (s *Store) ListSimulations(ctx context.Context) ([]SimulationInfo, error) {
 	return out, nil
 }
 
+// DeleteSimulation removes a simulation and (via ON DELETE CASCADE) its
+// snapshots.
+func (s *Store) DeleteSimulation(ctx context.Context, id string) error {
+	return s.q.DeleteSimulation(ctx, id)
+}
+
 // UpdateSimulationStatus updates a simulation's status and returns the updated
 // record. Terminal statuses set completed_at.
 func (s *Store) UpdateSimulationStatus(ctx context.Context, id, status string) (SimulationInfo, error) {

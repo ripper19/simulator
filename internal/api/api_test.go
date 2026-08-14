@@ -203,3 +203,57 @@ func TestHealth(t *testing.T) {
 		t.Fatalf("health status = %d, want 200", code)
 	}
 }
+
+func TestSimulationRecordReflectsLiveStatus(t *testing.T) {
+	srv := newTestServer(t)
+	defer srv.Close()
+
+	code, data := doJSON(t, "POST", srv.URL+"/api/v1/simulations", map[string]any{
+		"model_id": "counter",
+		"seed":     1,
+		"config":   map[string]any{"n": 100},
+	})
+	if code != http.StatusCreated {
+		t.Fatalf("create status %d: %s", code, data)
+	}
+	var info persistence.SimulationInfo
+	json.Unmarshal(data, &info)
+
+	doJSON(t, "POST", srv.URL+"/api/v1/simulations/"+info.ID+"/start", nil)
+
+	code, data = doJSON(t, "GET", srv.URL+"/api/v1/simulations/"+info.ID, nil)
+	var got persistence.SimulationInfo
+	json.Unmarshal(data, &got)
+	if got.Status != "running" {
+		t.Fatalf("record status = %q, want running (record must reflect live state)", got.Status)
+	}
+
+	doJSON(t, "POST", srv.URL+"/api/v1/simulations/"+info.ID+"/stop", nil)
+
+	code, data = doJSON(t, "GET", srv.URL+"/api/v1/simulations/"+info.ID, nil)
+	json.Unmarshal(data, &got)
+	if got.Status != "stopped" {
+		t.Fatalf("record status after stop = %q, want stopped", got.Status)
+	}
+}
+
+func TestDeleteSimulation(t *testing.T) {
+	srv := newTestServer(t)
+	defer srv.Close()
+
+	code, data := doJSON(t, "POST", srv.URL+"/api/v1/simulations", map[string]any{
+		"model_id": "counter",
+		"seed":     1,
+	})
+	var info persistence.SimulationInfo
+	json.Unmarshal(data, &info)
+
+	code, _ = doJSON(t, "DELETE", srv.URL+"/api/v1/simulations/"+info.ID, nil)
+	if code != http.StatusNoContent {
+		t.Fatalf("delete status = %d, want 204", code)
+	}
+	code, _ = doJSON(t, "GET", srv.URL+"/api/v1/simulations/"+info.ID, nil)
+	if code != http.StatusNotFound {
+		t.Fatalf("get after delete status = %d, want 404", code)
+	}
+}

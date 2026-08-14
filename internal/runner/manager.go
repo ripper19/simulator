@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"sync"
 
 	"github.com/ripper19/simulator/internal/persistence"
@@ -108,6 +109,9 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (persistence.Si
 // instantiate builds a simulation and its record from a create request without
 // persisting it.
 func (m *Manager) instantiate(ctx context.Context, req CreateRequest) (*managed, error) {
+	if req.Seed > math.MaxInt64 {
+		return nil, fmt.Errorf("runner: seed %d exceeds int64 range (PostgreSQL BIGINT); use a seed < 2^63", req.Seed)
+	}
 	entry, ok := m.registry.Get(req.ModelID)
 	if !ok {
 		return nil, fmt.Errorf("runner: unknown model %q", req.ModelID)
@@ -197,7 +201,8 @@ func (m *Manager) instantiate(ctx context.Context, req CreateRequest) (*managed,
 }
 
 // Replay deterministically re-runs a simulation from its seed and stored
-// configuration, then executes it to completion.
+// configuration. It is asynchronous (like Start): it rebuilds the simulation
+// from its seed and starts it in the background, returning immediately.
 func (m *Manager) Replay(ctx context.Context, id string) error {
 	m.mu.RLock()
 	mg, ok := m.sims[id]
@@ -233,17 +238,15 @@ func (m *Manager) Replay(ctx context.Context, id string) error {
 	m.sims[id] = fresh
 	m.mu.Unlock()
 
-	// Run on a background context so a replay is not aborted by the HTTP
-	// request's cancellation.
-	if err := fresh.sim.Run(context.Background()); err != nil {
-		m.updateStatus(id, statusOf(fresh.sim.State()))
+	if err := fresh.sim.Start(context.Background()); err != nil {
 		return err
 	}
-	m.updateStatus(id, "completed")
+	m.updateStatus(id, "running")
+	go m.watch(id)
 	return nil
 }
 
-// Get returns a simulation's record.
+// Get returns a simulation's record with the current (live) status.
 func (m *Manager) Get(id string) (persistence.SimulationInfo, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -251,16 +254,20 @@ func (m *Manager) Get(id string) (persistence.SimulationInfo, bool) {
 	if !ok {
 		return persistence.SimulationInfo{}, false
 	}
-	return mg.info, true
+	info := mg.info
+	info.Status = statusOf(mg.sim.State())
+	return info, true
 }
 
-// List returns all simulation records.
+// List returns all simulation records with their current (live) status.
 func (m *Manager) List() []persistence.SimulationInfo {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	out := make([]persistence.SimulationInfo, 0, len(m.sims))
 	for _, mg := range m.sims {
-		out = append(out, mg.info)
+		info := mg.info
+		info.Status = statusOf(mg.sim.State())
+		out = append(out, info)
 	}
 	return out
 }
@@ -282,10 +289,9 @@ func (m *Manager) Delete(ctx context.Context, id string) error {
 	m.mu.Lock()
 	delete(m.sims, id)
 	m.mu.Unlock()
-	// The store has no delete query; dropping the in-memory entry is the local
-	// contract for now. (Full lifecycle deletes are added with auth in a later
-	// phase.)
-	_ = ctx
+	if err := m.store.DeleteSimulation(ctx, id); err != nil {
+		return fmt.Errorf("runner: delete simulation: %w", err)
+	}
 	return nil
 }
 
