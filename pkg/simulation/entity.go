@@ -1,6 +1,7 @@
 package simulation
 
 import (
+	"encoding/json"
 	"strconv"
 	"sync"
 )
@@ -19,6 +20,26 @@ func (e EntityID) Version() uint32 { return uint32(e) }
 
 func (e EntityID) String() string {
 	return "entity:" + strconv.FormatUint(uint64(e), 10)
+}
+
+// MarshalJSON serializes an EntityID as a decimal string, which is exact for
+// the full 64-bit value (JSON numbers would lose precision above 2^53).
+func (e EntityID) MarshalJSON() ([]byte, error) {
+	return json.Marshal(strconv.FormatUint(uint64(e), 10))
+}
+
+// UnmarshalJSON deserializes an EntityID from a decimal string.
+func (e *EntityID) UnmarshalJSON(b []byte) error {
+	var s string
+	if err := json.Unmarshal(b, &s); err != nil {
+		return err
+	}
+	v, err := strconv.ParseUint(s, 10, 64)
+	if err != nil {
+		return err
+	}
+	*e = EntityID(v)
+	return nil
 }
 
 // EntityManager allocates, tracks, and reclaims entities using a sparse-set
@@ -140,6 +161,41 @@ func (m *EntityManager) IDs() []EntityID {
 	out := make([]EntityID, len(m.dense))
 	copy(out, m.dense)
 	return out
+}
+
+// entityManagerState is the serializable form of an EntityManager, capturing
+// the full allocation state (live entities, next index, free list, and per-index
+// versions) so a restore reproduces future Create/Destroy behavior exactly.
+type entityManagerState struct {
+	Dense    []EntityID `json:"dense"`
+	Next     uint32     `json:"next"`
+	Free     []uint32   `json:"free"`
+	Versions []uint32   `json:"versions"`
+}
+
+func (m *EntityManager) snapshot() entityManagerState {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return entityManagerState{
+		Dense:    append([]EntityID(nil), m.dense...),
+		Next:     m.next,
+		Free:     append([]uint32(nil), m.free...),
+		Versions: append([]uint32(nil), m.versions...),
+	}
+}
+
+func (m *EntityManager) restore(s entityManagerState) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.dense = append([]EntityID(nil), s.Dense...)
+	m.next = s.Next
+	m.free = append([]uint32(nil), s.Free...)
+	m.versions = append([]uint32(nil), s.Versions...)
+	m.sparse = make([]int32, len(m.versions))
+	for pos, e := range m.dense {
+		m.sparse[e.Index()] = int32(pos + 1)
+	}
+	m.count = len(m.dense)
 }
 
 // Len returns the number of live entities.

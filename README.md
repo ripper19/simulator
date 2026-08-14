@@ -4,12 +4,12 @@ An open, general-purpose distributed simulation runtime written in Go for
 executing deterministic, extensible simulations locally or across a scalable
 worker cluster.
 
-> **Status: Phase 3** — core engine (entities, SoA components, events, clock,
+> **Status: Phase 4** — core engine (entities, SoA components, events, clock,
 > deterministic randomness, and the simulation runtime), the discrete-event
-> engine (priority queue, immediate/delayed/prioritized scheduling), and
-> deterministic parallel execution (a `System` abstraction with dependency
-> ordering and sharded workers). Later phases add snapshots, persistence, REST
-> API, distributed workers, and observability.
+> engine (priority queue, immediate/delayed/prioritized scheduling), deterministic
+> parallel execution (`System` abstraction with dependency ordering and sharded
+> workers), and versioned, checksummed snapshots with deterministic restore.
+> Later phases add persistence, REST API, distributed workers, and observability.
 
 ## What this is
 
@@ -89,6 +89,17 @@ parallel speedup on `CounterWorld`, which is memory-bound):
 ```sh
 go test -run '^$' -bench BenchmarkCounterTick -benchmem ./examples/counter
 ```
+
+## Snapshots & restore
+
+A snapshot is a versioned, self-validating capture of a simulation's state:
+provenance (simulation/model IDs, version, seed, mode), clock, entity
+allocation state, all component columns (JSON-encoded), and the event queue,
+with a SHA-256 checksum for integrity. `World.Snapshot()` captures state;
+`World.Restore()` restores it (validating schema, engine version, checksum,
+and model/seed match). Restore is deterministic: snapshotting mid-run and
+continuing — in place or into a fresh simulation — reproduces the uninterrupted
+run (see `examples/counter/snapshot_test.go`).
 
 ## Verification
 

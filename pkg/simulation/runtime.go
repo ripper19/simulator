@@ -86,6 +86,23 @@ func (s *Simulation) Ticks() uint64 { return s.steps.Load() }
 // Config returns the simulation configuration.
 func (s *Simulation) Config() Config { return s.cfg }
 
+// Snapshot captures the current simulation state.
+func (s *Simulation) Snapshot() (*Snapshot, error) {
+	return s.world.Snapshot()
+}
+
+// Restore overwrites the simulation state from a snapshot. It returns an error
+// if the simulation is currently running.
+func (s *Simulation) Restore(snap *Snapshot) error {
+	s.mu.Lock()
+	if s.state == StateRunning {
+		s.mu.Unlock()
+		return ErrAlreadyRunning
+	}
+	s.mu.Unlock()
+	return s.world.Restore(snap)
+}
+
 // Run executes the simulation to completion and blocks until it finishes.
 // It returns the run error, if any.
 func (s *Simulation) Run(ctx context.Context) error {
