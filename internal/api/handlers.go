@@ -59,7 +59,7 @@ func (s *Server) createSimulation(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) listSimulations(w http.ResponseWriter, r *http.Request) {
 	claims, _ := auth.FromContext(r.Context())
-	var out []persistence.SimulationInfo
+	out := make([]persistence.SimulationInfo, 0, 8)
 	for _, info := range s.manager.List() {
 		if s.owns(claims, info) {
 			out = append(out, info)
@@ -74,22 +74,11 @@ func (s *Server) getSimulation(w http.ResponseWriter, r *http.Request) {
 		writeError(w, &apiError{Status: http.StatusNotFound, Code: "not_found", Message: "simulation not found"})
 		return
 	}
-	if claims, _ := auth.FromContext(r.Context()); !s.owns(claims, info) {
-		writeError(w, &apiError{Status: http.StatusNotFound, Code: "not_found", Message: "simulation not found"})
-		return
-	}
 	writeJSON(w, http.StatusOK, info)
 }
 
 func (s *Server) deleteSimulation(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-	if info, ok := s.manager.Get(id); ok {
-		if claims, _ := auth.FromContext(r.Context()); !s.owns(claims, info) {
-			writeError(w, &apiError{Status: http.StatusNotFound, Code: "not_found", Message: "simulation not found"})
-			return
-		}
-	}
-	if err := s.manager.Delete(r.Context(), id); err != nil {
+	if err := s.manager.Delete(r.Context(), chi.URLParam(r, "id")); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -245,6 +234,10 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Username == "" || req.Password == "" {
 		writeError(w, badRequest("invalid_request", "username and password are required"))
+		return
+	}
+	if len(req.Password) < 8 {
+		writeError(w, badRequest("invalid_request", "password must be at least 8 characters"))
 		return
 	}
 	u, err := s.auth.Register(r.Context(), req.Username, req.Password)

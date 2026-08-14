@@ -61,7 +61,15 @@ func main() {
 
 	if secret := os.Getenv("JWT_SECRET"); secret != "" {
 		tokens := auth.NewManager(secret, 15*time.Minute, 24*time.Hour)
-		server.SetAuth(auth.NewService(store, tokens), tokens)
+		svc := auth.NewService(store, tokens)
+		server.SetAuth(svc, tokens)
+		if uname, pwd := os.Getenv("ADMIN_USERNAME"), os.Getenv("ADMIN_PASSWORD"); uname != "" && pwd != "" {
+			if _, err := svc.BootstrapAdmin(ctx, uname, pwd); err != nil {
+				logger.Error("bootstrap admin", "err", err)
+				os.Exit(1)
+			}
+			logger.Info("admin bootstrapped", "username", uname)
+		}
 	}
 	if addr := os.Getenv("REDIS_ADDR"); addr != "" {
 		if c, err := coord.NewRedis(addr, 0); err == nil {

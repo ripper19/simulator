@@ -4,6 +4,7 @@ package api
 import (
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -54,7 +55,7 @@ func (s *Server) Router() http.Handler {
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Recoverer)
-	r.Use(middleware.Timeout(30 * time.Second))
+	r.Use(s.timeout())
 	r.Use(observability.Middleware)
 	r.Use(s.requestLogger())
 
@@ -83,28 +84,47 @@ func (s *Server) Router() http.Handler {
 func (s *Server) routes(r chi.Router) {
 	r.Route("/models", func(r chi.Router) {
 		r.Get("/", s.listModels)
-		r.Post("/", s.syncModels)
+		if s.tokens != nil {
+			r.With(s.tokens.RequireRole(auth.RoleAdmin)).Post("/", s.syncModels)
+		} else {
+			r.Post("/", s.syncModels)
+		}
 		r.Get("/{id}", s.getModel)
 	})
 	r.Route("/simulations", func(r chi.Router) {
-		r.Post("/", s.createSimulation)
+		r.With(s.rateLimit).Post("/", s.createSimulation)
 		r.Get("/", s.listSimulations)
 		r.Route("/{id}", func(r chi.Router) {
+			r.Use(s.ownership)
 			r.Get("/", s.getSimulation)
 			r.Delete("/", s.deleteSimulation)
-			r.Post("/start", s.action(s.manager.Start, http.StatusAccepted, "started"))
+			r.With(s.rateLimit).Post("/start", s.action(s.manager.Start, http.StatusAccepted, "started"))
 			r.Post("/pause", s.action(s.manager.Pause, http.StatusOK, "paused"))
 			r.Post("/resume", s.action(s.manager.Resume, http.StatusOK, "resumed"))
 			r.Post("/stop", s.action(s.manager.Stop, http.StatusOK, "stopped"))
 			r.Post("/step", s.action(s.manager.Step, http.StatusOK, "stepped"))
-			r.Post("/snapshot", s.snapshotSimulation)
-			r.Post("/restore", s.restoreSimulation)
-			r.Post("/replay", s.action(s.manager.Replay, http.StatusOK, "replayed"))
-			r.Get("/state", s.simulationState)
+			r.With(s.rateLimit).Post("/snapshot", s.snapshotSimulation)
+			r.With(s.rateLimit).Post("/restore", s.restoreSimulation)
+			r.With(s.rateLimit).Post("/replay", s.action(s.manager.Replay, http.StatusOK, "replayed"))
+			r.With(s.rateLimit).Get("/state", s.simulationState)
 			r.Get("/events", s.simulationEvents)
 			r.Get("/metrics", s.simulationMetrics)
 			r.Get("/stream", s.simulationStream)
 		})
+	})
+}
+
+// ownership enforces per-user access to a simulation by ID for every
+// /simulations/{id}/* route (IDOR protection).
+func (s *Server) ownership(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if info, ok := s.manager.Get(chi.URLParam(r, "id")); ok {
+			if claims, _ := auth.FromContext(r.Context()); !s.owns(claims, info) {
+				writeError(w, &apiError{Status: http.StatusNotFound, Code: "not_found", Message: "simulation not found"})
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
 	})
 }
 
@@ -114,6 +134,20 @@ func (s *Server) rateLimit(next http.Handler) http.Handler {
 		return next
 	}
 	return ratelimit.Middleware(s.redis, 60, time.Minute, nil)(next)
+}
+
+// timeout applies a 30s request timeout, exempting long-lived SSE streams.
+func (s *Server) timeout() func(http.Handler) http.Handler {
+	timeout := middleware.Timeout(30 * time.Second)
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if strings.HasSuffix(r.URL.Path, "/stream") {
+				next.ServeHTTP(w, r)
+				return
+			}
+			timeout(next).ServeHTTP(w, r)
+		})
+	}
 }
 
 func (s *Server) requestLogger() func(http.Handler) http.Handler {

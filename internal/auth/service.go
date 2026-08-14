@@ -33,6 +33,15 @@ func NewService(store *persistence.Store, tokens *Manager) *Service {
 
 // Register creates a new USER and returns it.
 func (s *Service) Register(ctx context.Context, username, password string) (persistence.UserInfo, error) {
+	return s.registerRole(ctx, username, password, RoleUser)
+}
+
+// BootstrapAdmin creates an ADMIN user, used to seed the first administrator.
+func (s *Service) BootstrapAdmin(ctx context.Context, username, password string) (persistence.UserInfo, error) {
+	return s.registerRole(ctx, username, password, RoleAdmin)
+}
+
+func (s *Service) registerRole(ctx context.Context, username, password, role string) (persistence.UserInfo, error) {
 	hash, err := HashPassword(password)
 	if err != nil {
 		return persistence.UserInfo{}, err
@@ -41,7 +50,7 @@ func (s *Service) Register(ctx context.Context, username, password string) (pers
 		ID:           newID(),
 		Username:     username,
 		PasswordHash: hash,
-		Role:         RoleUser,
+		Role:         role,
 	})
 }
 
@@ -56,7 +65,7 @@ func (s *Service) Login(ctx context.Context, username, password string) (TokenPa
 
 // Refresh issues a new access token from a valid refresh token.
 func (s *Service) Refresh(ctx context.Context, refreshToken string) (TokenPair, error) {
-	claims, err := s.tokens.Parse(refreshToken)
+	claims, err := s.tokens.Parse(refreshToken, "refresh")
 	if err != nil {
 		return TokenPair{}, ErrInvalidCredentials
 	}
