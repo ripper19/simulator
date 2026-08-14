@@ -358,49 +358,13 @@ func (s *movementSystem) Run(ctx context.Context, w *simulation.World, shard []s
 
 	var completed, totalWait, queueSum int
 	for _, it := range vs {
-		blocked := false
-		finished := false
-		blockDest := ""
-		for step := 0; step < it.v.Speed && !blocked && !finished; step++ {
-			e := it.v.Edge
-			l := m.edgeLen[e]
-			dest := m.route[e+1]
-			p := it.v.Pos
-
-			switch {
-			case p < 0:
-				it.v.Pos = p + 1
-			case p == l:
-				if e == len(m.route)-2 {
-					finished = true
-				} else if !m.lightGreen(dest) || (occ[e+1] != nil && occ[e+1][0]) {
-					blocked = true
-					blockDest = dest
-				} else {
-					it.v.Edge = e + 1
-					it.v.Pos = 0
-					if occ[e+1] == nil {
-						occ[e+1] = map[int]bool{}
-					}
-					occ[e+1][0] = true
-				}
-			default:
-				target := p + 1
-				if occ[e][target] {
-					blocked = true
-					blockDest = dest
-				} else {
-					delete(occ[e], p)
-					it.v.Pos = target
-					if target < l {
-						occ[e][target] = true
-					} else {
-						break // reached the node; crossing is a separate tick
-					}
-				}
-			}
+		blocked, finished := false, false
+		dest := ""
+		for s := 0; s < it.v.Speed && !blocked && !finished; s++ {
+			var b, f bool
+			b, f, dest = m.advance(&it.v, occ)
+			blocked, finished = b, f
 		}
-
 		if finished {
 			completed++
 			totalWait += it.v.Wait
@@ -411,7 +375,7 @@ func (s *movementSystem) Run(ctx context.Context, w *simulation.World, shard []s
 		if blocked {
 			it.v.Wait++
 			queueSum++
-			m.bumpQueue(blockDest)
+			m.bumpQueue(dest)
 		}
 		m.vehCol.Set(it.id, it.v)
 	}
@@ -422,6 +386,38 @@ func (s *movementSystem) Run(ctx context.Context, w *simulation.World, shard []s
 		m.peakQueue = queueSum
 	}
 	return nil
+}
+
+// advance moves v one cell along its route, updating occupancy. It reports
+// whether v is blocked (with the node it is queued at) or has finished.
+func (m *Traffic) advance(v *Vehicle, occ map[int]map[int]bool) (blocked, finished bool, dest string) {
+	e := v.Edge
+	l := m.edgeLen[e]
+	dest = m.route[e+1]
+	switch p := v.Pos; {
+	case p < 0:
+		v.Pos++
+	case p == l:
+		if e == len(m.route)-2 {
+			return false, true, dest
+		}
+		if !m.lightGreen(dest) || occ[e+1][0] {
+			return true, false, dest
+		}
+		v.Edge, v.Pos = e+1, 0
+		occ[e+1][0] = true
+	default:
+		t := p + 1
+		if occ[e][t] {
+			return true, false, dest
+		}
+		delete(occ[e], p)
+		v.Pos = t
+		if t < l {
+			occ[e][t] = true
+		}
+	}
+	return false, false, dest
 }
 
 func (m *Traffic) lightGreen(node string) bool {
