@@ -224,3 +224,45 @@ in the core runtime:
 - Decisions: `docs/adr/` (ADR-001 … ADR-013).
 - API reference: `docs/api/openapi.yaml`.
 - Load-test results: `tests/load/README.md`.
+
+## How replay works
+
+Replay reproduces a run from its recorded provenance. Two paths are supported:
+
+1. **Recreate from seed** — every simulation record stores its `runConfig`
+   (model, seed, mode, bounds, config); `POST /simulations/{id}/replay` (or
+   `sim replay <id>`) re-instantiates the model from that config and re-runs,
+   yielding identical results.
+2. **Restore a snapshot** — `POST /simulations/{id}/snapshot` captures a
+   versioned, checksummed snapshot; `POST /simulations/{id}/restore` restores it
+   and continues deterministically.
+
+Determinism is guaranteed by seed-derived RNG streams, a total event order, and
+deterministic parallel commit (verified by tests across worker counts).
+
+## Known limitations
+
+- Only trusted compiled-in models run in-process; arbitrary user-defined models
+  require a separate gRPC worker (ADR-013, future work).
+- Event payloads without a registered type restore as opaque JSON.
+- Seeds are limited to `int64` range by the PostgreSQL `BIGINT` column.
+- 1000/5000-VU load testing was not meaningful on the 2-core dev machine; the
+  PostgreSQL connection pool (default 4) is the measured bottleneck.
+- See `docs/architecture/risk-review.md` and the local `fixes.txt` ledger for
+  the full list of open LOW/INFO items.
+
+## Future work
+
+- Out-of-process gRPC model workers for untrusted models (isolation).
+- Binary snapshot codec; migration checksums; refresh-token rotation.
+- Worker-liveness consumer (manager-side health/status).
+- Additional Prometheus metrics (entities/events processed, memory, CPU).
+
+## How to contribute
+
+1. Implement `simulation.Model` (+ `TickModel`/`EventModel`/`SystemModel`) in
+   `examples/<name>/`, keeping the core engine domain-agnostic.
+2. Add `ConfigurableModel` (JSON config) and `Metricer` (measured outcomes).
+3. Register the model in `internal/app/models.go`.
+4. Add a determinism test (same seed → identical metrics) and run
+   `go test ./...`, `go test -race ./...`, `go vet ./...`, `gofmt -l .`.

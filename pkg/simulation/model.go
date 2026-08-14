@@ -55,3 +55,10 @@ type ConfigurableModel interface {
 	// Configure applies the model's configuration from raw JSON.
 	Configure(raw json.RawMessage) error
 }
+
+// Metricer is implemented by models that expose measured outcomes (throughput,
+// wait time, price, population, …) for reporting through the API's metrics
+// endpoint. Keys and units are model-defined.
+type Metricer interface {
+	Metrics() map[string]float64
+}

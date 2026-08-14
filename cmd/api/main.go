@@ -12,8 +12,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/ripper19/simulator/examples/counter"
 	"github.com/ripper19/simulator/internal/api"
+	"github.com/ripper19/simulator/internal/app"
 	"github.com/ripper19/simulator/internal/auth"
 	"github.com/ripper19/simulator/internal/coord"
 	"github.com/ripper19/simulator/internal/database"
@@ -22,7 +22,6 @@ import (
 	"github.com/ripper19/simulator/internal/persistence"
 	"github.com/ripper19/simulator/internal/registry"
 	"github.com/ripper19/simulator/internal/runner"
-	"github.com/ripper19/simulator/pkg/simulation"
 )
 
 func main() {
@@ -52,9 +51,7 @@ func main() {
 
 	store := persistence.NewStore(pool)
 	reg := registry.New()
-	reg.Register((&counter.CounterWorld{}).Metadata(), func() simulation.Model {
-		return &counter.CounterWorld{}
-	})
+	app.RegisterModels(reg)
 
 	mgr := runner.NewManager(store, reg)
 	mgr.SetMetrics(metrics.New(nil))

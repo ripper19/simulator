@@ -2,15 +2,20 @@ package ecosystem
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/ripper19/simulator/pkg/model"
 	"github.com/ripper19/simulator/pkg/simulation"
 )
 
-func run(t *testing.T, plants, animals, ticks int) *simulation.Simulation {
+func run(t *testing.T, cfg Config, ticks int) (*simulation.Simulation, *Ecosystem) {
 	t.Helper()
-	m := &Ecosystem{Plants: plants, Animals: animals, MaxAnimals: 15}
+	m := &Ecosystem{}
+	b, _ := json.Marshal(cfg)
+	if err := m.Configure(b); err != nil {
+		t.Fatal(err)
+	}
 	sim, err := simulation.New(context.Background(), simulation.Config{
 		ID: "eco", Seed: 7, Mode: model.ModeTick, MaxTicks: uint64(ticks),
 	}, m)
@@ -20,33 +25,39 @@ func run(t *testing.T, plants, animals, ticks int) *simulation.Simulation {
 	if err := sim.Run(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	return sim
-}
-
-func totalEnergy(w *simulation.World) int {
-	col := simulation.ColumnOf[Energy](w.Components, w.Components.Register("eco.energy"))
-	sum := 0
-	col.Each(func(_ simulation.EntityID, v Energy) { sum += v.E })
-	return sum
+	return sim, m
 }
 
 func TestEcosystemRuns(t *testing.T) {
-	sim := run(t, 40, 6, 200)
+	sim, m := run(t, Config{Plants: 40, Animals: 6, MaxAnimals: 15}, 200)
 	if sim.State() != simulation.StateCompleted {
 		t.Fatalf("state = %s", sim.State())
 	}
-	if sim.World().Entities.Len() == 0 {
+	if m.Metrics()["animals"] == 0 && m.Metrics()["plants"] == 0 {
 		t.Fatal("ecosystem went extinct unexpectedly")
 	}
 }
 
-func TestEcosystemDeterministic(t *testing.T) {
-	a := run(t, 40, 6, 300)
-	b := run(t, 40, 6, 300)
-	if a.World().Entities.Len() != b.World().Entities.Len() {
-		t.Fatalf("population differs: %d vs %d", a.World().Entities.Len(), b.World().Entities.Len())
+// Showcase property: populations are bounded by carrying capacity and remain
+// above zero (no extinction) across a long run.
+func TestEcosystemStable(t *testing.T) {
+	_, m := run(t, Config{Plants: 40, Animals: 6, MaxAnimals: 15}, 500)
+	mm := m.Metrics()
+	if mm["animals"] <= 0 {
+		t.Fatal("animals went extinct")
 	}
-	if totalEnergy(a.World()) != totalEnergy(b.World()) {
-		t.Fatal("total energy differs across runs")
+	if mm["animals"] > 15 {
+		t.Fatalf("animal population %.0f exceeded carrying capacity", mm["animals"])
+	}
+}
+
+func TestEcosystemDeterministic(t *testing.T) {
+	_, a := run(t, Config{Plants: 40, Animals: 6, MaxAnimals: 15}, 300)
+	_, b := run(t, Config{Plants: 40, Animals: 6, MaxAnimals: 15}, 300)
+	ma, mb := a.Metrics(), b.Metrics()
+	for k := range ma {
+		if ma[k] != mb[k] {
+			t.Fatalf("metric %s differs: %v vs %v", k, ma[k], mb[k])
+		}
 	}
 }

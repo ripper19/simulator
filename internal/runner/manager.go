@@ -51,13 +51,14 @@ type State struct {
 
 // Metrics is a lightweight runtime metrics snapshot.
 type Metrics struct {
-	ID       string  `json:"id"`
-	Status   string  `json:"status"`
-	Steps    uint64  `json:"steps"`
-	Tick     uint64  `json:"tick"`
-	Time     float64 `json:"time"`
-	Entities int     `json:"entities"`
-	Events   int     `json:"events"`
+	ID       string             `json:"id"`
+	Status   string             `json:"status"`
+	Steps    uint64             `json:"steps"`
+	Tick     uint64             `json:"tick"`
+	Time     float64            `json:"time"`
+	Entities int                `json:"entities"`
+	Events   int                `json:"events"`
+	Model    map[string]float64 `json:"model,omitempty"`
 }
 
 // Manager holds and controls in-process simulations.
@@ -444,7 +445,7 @@ func (m *Manager) Metrics(ctx context.Context, id string) (Metrics, error) {
 		return Metrics{}, err
 	}
 	s := mg.sim
-	return Metrics{
+	met := Metrics{
 		ID:       id,
 		Status:   statusOf(s.State()),
 		Steps:    s.Ticks(),
@@ -452,7 +453,11 @@ func (m *Manager) Metrics(ctx context.Context, id string) (Metrics, error) {
 		Time:     s.World().Clock.Time(),
 		Entities: s.World().Entities.Len(),
 		Events:   s.World().Events.Len(),
-	}, nil
+	}
+	if mm, ok := mg.model.(simulation.Metricer); ok {
+		met.Model = mm.Metrics()
+	}
+	return met, nil
 }
 
 // Simulation exposes the underlying simulation for read-only access (state,

@@ -2,17 +2,21 @@ package traffic
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/ripper19/simulator/pkg/model"
 	"github.com/ripper19/simulator/pkg/simulation"
 )
 
-func run(t *testing.T, vehicles, intersections, ticks int) *simulation.Simulation {
+func runCfg(t *testing.T, cfg Config, ticks uint64) (*simulation.Simulation, *Traffic) {
 	t.Helper()
-	m := &Traffic{Vehicles: vehicles, Intersections: intersections, TicksPerLight: 10}
+	m := &Traffic{}
+	if err := m.Configure(mustJSON(cfg)); err != nil {
+		t.Fatal(err)
+	}
 	sim, err := simulation.New(context.Background(), simulation.Config{
-		ID: "traffic", Seed: 42, Mode: model.ModeTick, MaxTicks: uint64(ticks),
+		ID: "traffic", Seed: 42, Mode: model.ModeTick, MaxTicks: ticks, Workers: 4,
 	}, m)
 	if err != nil {
 		t.Fatal(err)
@@ -20,32 +24,46 @@ func run(t *testing.T, vehicles, intersections, ticks int) *simulation.Simulatio
 	if err := sim.Run(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	return sim
+	return sim, m
 }
 
-func TestTrafficRunsAndMoves(t *testing.T) {
-	sim := run(t, 20, 5, 100)
+func mustJSON(v any) json.RawMessage {
+	b, _ := json.Marshal(v)
+	return b
+}
+
+func TestTrafficAllVehiclesComplete(t *testing.T) {
+	sim, m := runCfg(t, Config{Vehicles: 40, Intersections: 5, Spacing: 3, Policy: "fixed", GreenTicks: 5, RedTicks: 5}, 1000)
 	if sim.State() != simulation.StateCompleted {
 		t.Fatalf("state = %s", sim.State())
 	}
-	if sim.World().Entities.Len() != 25 {
-		t.Fatalf("entities = %d, want 25", sim.World().Entities.Len())
+	if m.completed != 40 {
+		t.Fatalf("completed %d, want 40", m.completed)
+	}
+	if m.Metrics()["avg_wait"] == 0 {
+		t.Fatal("expected non-zero wait under red lights")
+	}
+}
+
+// The showcase property: adaptive lights reduce average wait vs fixed timing
+// for the same seed and demand.
+func TestAdaptiveBeatsFixed(t *testing.T) {
+	_, fixed := runCfg(t, Config{Vehicles: 60, Intersections: 5, Spacing: 3, Policy: "fixed", GreenTicks: 5, RedTicks: 5}, 2000)
+	_, adaptive := runCfg(t, Config{Vehicles: 60, Intersections: 5, Spacing: 3, Policy: "adaptive", Threshold: 2}, 2000)
+	fw := fixed.Metrics()["avg_wait"]
+	aw := adaptive.Metrics()["avg_wait"]
+	if aw >= fw {
+		t.Fatalf("adaptive avg_wait %.2f should be < fixed %.2f", aw, fw)
 	}
 }
 
 func TestTrafficDeterministic(t *testing.T) {
-	a := run(t, 100, 10, 200)
-	b := run(t, 100, 10, 200)
-	if a.World().Clock.Tick() != b.World().Clock.Tick() {
-		t.Fatal("tick mismatch")
-	}
-	// Position columns must be identical.
-	ca := simulation.ColumnOf[Position](a.World().Components, a.World().Components.Register("traffic.position"))
-	cb := simulation.ColumnOf[Position](b.World().Components, b.World().Components.Register("traffic.position"))
-	sa, sb := 0, 0
-	ca.Each(func(_ simulation.EntityID, v Position) { sa += v.X })
-	cb.Each(func(_ simulation.EntityID, v Position) { sb += v.X })
-	if sa != sb {
-		t.Fatalf("position sum differs: %d vs %d", sa, sb)
+	_, a := runCfg(t, Config{Vehicles: 40, Intersections: 5, Spacing: 3, Policy: "adaptive", Threshold: 2}, 1000)
+	_, b := runCfg(t, Config{Vehicles: 40, Intersections: 5, Spacing: 3, Policy: "adaptive", Threshold: 2}, 1000)
+	ma, mb := a.Metrics(), b.Metrics()
+	for k := range ma {
+		if ma[k] != mb[k] {
+			t.Fatalf("metric %s differs: %v vs %v", k, ma[k], mb[k])
+		}
 	}
 }
