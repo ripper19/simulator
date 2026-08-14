@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/ripper19/simulator/internal/coord"
+	"github.com/ripper19/simulator/internal/metrics"
 	"github.com/ripper19/simulator/internal/queue"
 )
 
@@ -41,6 +42,7 @@ type Service struct {
 	coord             *coord.Redis
 	queue             *queue.Queue
 	process           ProcessFunc
+	met               *metrics.Metrics
 	heartbeatInterval time.Duration
 	heartbeatTTL      time.Duration
 }
@@ -57,6 +59,9 @@ func NewService(info Info, c *coord.Redis, q *queue.Queue, process ProcessFunc) 
 	}
 }
 
+// SetMetrics attaches a metrics set (may be nil to disable).
+func (s *Service) SetMetrics(met *metrics.Metrics) { s.met = met }
+
 // Run registers the worker, starts the heartbeat loop, and consumes jobs until
 // ctx is cancelled.
 func (s *Service) Run(ctx context.Context) error {
@@ -66,7 +71,21 @@ func (s *Service) Run(ctx context.Context) error {
 		}
 		go s.heartbeatLoop(ctx)
 	}
-	return s.queue.Consume(ctx, s.process)
+	process := s.process
+	if s.met != nil {
+		met := s.met
+		process = func(ctx context.Context, job queue.Job) error {
+			met.WorkerActiveJobs.Inc()
+			defer met.WorkerActiveJobs.Dec()
+			if err := s.process(ctx, job); err != nil {
+				met.WorkerJobsFailed.Inc()
+				return err
+			}
+			met.WorkerJobsProcessed.Inc()
+			return nil
+		}
+	}
+	return s.queue.Consume(ctx, process)
 }
 
 // register records the worker's metadata and liveness in Redis.

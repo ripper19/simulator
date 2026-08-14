@@ -4,13 +4,14 @@ An open, general-purpose distributed simulation runtime written in Go for
 executing deterministic, extensible simulations locally or across a scalable
 worker cluster.
 
-> **Status: Phase 7** — core engine (entities, SoA components, events, clock,
+> **Status: Phase 8** — core engine (entities, SoA components, events, clock,
 > deterministic randomness, and the simulation runtime), the discrete-event
 > engine, deterministic parallel execution, versioned snapshots with restore,
 > PostgreSQL persistence (pgx + sqlc, migrations, model registry), the REST API
-> + `sim` CLI, and distributed workers (RabbitMQ broker + Redis coordination,
-> jobs with retry/backoff/DLQ/idempotency). Later phases add observability and
-> auth.
+> + `sim` CLI, distributed workers (RabbitMQ + Redis), and observability
+> (Prometheus metrics, OpenTelemetry tracing, structured logging) plus JWT auth
+> and rate limiting. Later phases add CI/CD, Kubernetes, load tests, and the
+> remaining example models.
 
 ## What this is
 
@@ -161,6 +162,27 @@ go run ./cmd/worker
 See `internal/broker`, `internal/queue`, `internal/workers`, and
 `internal/coord`. The same model runs unchanged in-process (P6 API), as a local
 worker, or across a worker cluster.
+
+## Observability, auth, and rate limiting
+
+- **Metrics**: Prometheus at `GET /metrics` (`simulation_*`, `worker_*`,
+  `snapshot_*`, `queue_depth`).
+- **Tracing**: OpenTelemetry, enabled via `OTEL_EXPORTER_OTLP_ENDPOINT`.
+- **Logging**: structured `slog` JSON logs.
+- **Auth**: JWT access/refresh tokens (`POST /api/v1/auth/{register,login,refresh}`),
+  argon2id password hashing, RBAC (`USER`/`ADMIN`), and per-user simulation
+  ownership. Enable with `JWT_SECRET`.
+- **Rate limiting**: Redis fixed-window limiter on expensive endpoints
+  (`REDIS_ADDR`).
+
+```sh
+# API with auth + metrics
+JWT_SECRET=... REDIS_ADDR=127.0.0.1:6380 \
+DATABASE_URL=... go run ./cmd/api
+
+# Observability stack (Prometheus + Grafana, Docker only)
+cd deployments/docker && docker compose up
+```
 
 ## Verification
 

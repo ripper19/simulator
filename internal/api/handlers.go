@@ -8,6 +8,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/ripper19/simulator/internal/auth"
+	"github.com/ripper19/simulator/internal/persistence"
 	"github.com/ripper19/simulator/internal/runner"
 	"github.com/ripper19/simulator/pkg/simulation"
 )
@@ -44,6 +46,9 @@ func (s *Server) createSimulation(w http.ResponseWriter, r *http.Request) {
 		writeError(w, badRequest("invalid_request", err.Error()))
 		return
 	}
+	if claims, ok := auth.FromContext(r.Context()); ok {
+		req.OwnerID = claims.UserID
+	}
 	info, err := s.manager.Create(r.Context(), req)
 	if err != nil {
 		writeError(w, badRequest("create_failed", err.Error()))
@@ -53,7 +58,14 @@ func (s *Server) createSimulation(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) listSimulations(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, s.manager.List())
+	claims, _ := auth.FromContext(r.Context())
+	out := make([]persistence.SimulationInfo, 0, 8)
+	for _, info := range s.manager.List() {
+		if s.owns(claims, info) {
+			out = append(out, info)
+		}
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) getSimulation(w http.ResponseWriter, r *http.Request) {
@@ -71,6 +83,16 @@ func (s *Server) deleteSimulation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// owns reports whether the authenticated claims may access a simulation. ADMIN
+// may access everything; otherwise the simulation must be owned by the user.
+// When auth is disabled (nil claims), access is permitted.
+func (s *Server) owns(claims *auth.Claims, info persistence.SimulationInfo) bool {
+	if claims == nil || claims.Role == auth.RoleAdmin {
+		return true
+	}
+	return info.OwnerID != nil && *info.OwnerID == claims.UserID
 }
 
 // ---- lifecycle ----
@@ -197,4 +219,64 @@ func statusString(s simulation.State) string {
 	default:
 		return "created"
 	}
+}
+
+// ---- auth ----
+
+func (s *Server) register(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, badRequest("invalid_request", err.Error()))
+		return
+	}
+	if req.Username == "" || req.Password == "" {
+		writeError(w, badRequest("invalid_request", "username and password are required"))
+		return
+	}
+	if len(req.Password) < 8 {
+		writeError(w, badRequest("invalid_request", "password must be at least 8 characters"))
+		return
+	}
+	u, err := s.auth.Register(r.Context(), req.Username, req.Password)
+	if err != nil {
+		writeError(w, badRequest("register_failed", err.Error()))
+		return
+	}
+	writeJSON(w, http.StatusCreated, u)
+}
+
+func (s *Server) login(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, badRequest("invalid_request", err.Error()))
+		return
+	}
+	pair, err := s.auth.Login(r.Context(), req.Username, req.Password)
+	if err != nil {
+		writeError(w, &apiError{Status: http.StatusUnauthorized, Code: "unauthorized", Message: "invalid credentials"})
+		return
+	}
+	writeJSON(w, http.StatusOK, pair)
+}
+
+func (s *Server) refresh(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		RefreshToken string `json:"refresh_token"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, badRequest("invalid_request", err.Error()))
+		return
+	}
+	pair, err := s.auth.Refresh(r.Context(), req.RefreshToken)
+	if err != nil {
+		writeError(w, &apiError{Status: http.StatusUnauthorized, Code: "unauthorized", Message: "invalid refresh token"})
+		return
+	}
+	writeJSON(w, http.StatusOK, pair)
 }

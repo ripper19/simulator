@@ -26,3 +26,4 @@ coverage.*
 # Erlang/RabbitMQ crash dumps
 *.dump
 erl_crash.dump
+fixes.txt

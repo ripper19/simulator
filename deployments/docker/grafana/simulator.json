@@ -1,0 +1,54 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "schemaVersion": 39,
+  "title": "Simulator",
+  "uid": "simulator",
+  "time": { "from": "now-1h", "to": "now" },
+  "templating": { "list": [] },
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Active simulations",
+      "targets": [
+        { "expr": "simulation_active", "refId": "A" }
+      ],
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Simulations started",
+      "targets": [
+        { "expr": "rate(simulation_started_total[5m])", "refId": "A", "legendFormat": "started/s" }
+      ],
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Simulation outcomes",
+      "targets": [
+        { "expr": "rate(simulation_completed_total[5m])", "refId": "A", "legendFormat": "completed/s" },
+        { "expr": "rate(simulation_failed_total[5m])", "refId": "B", "legendFormat": "failed/s" }
+      ],
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Tick duration (p99)",
+      "targets": [
+        { "expr": "histogram_quantile(0.99, rate(simulation_tick_duration_seconds_bucket[5m]))", "refId": "A", "legendFormat": "p99" }
+      ],
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Worker jobs",
+      "targets": [
+        { "expr": "rate(worker_jobs_processed_total[5m])", "refId": "A", "legendFormat": "processed/s" },
+        { "expr": "worker_active_jobs", "refId": "B", "legendFormat": "active" }
+      ],
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 }
+    }
+  ],
+  "version": 1
+}

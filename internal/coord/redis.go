@@ -55,5 +55,19 @@ func (r *Redis) Release(ctx context.Context, key string) error {
 	return r.client.Del(ctx, key).Err()
 }
 
+// RateLimit increments a fixed-window counter and reports whether the request
+// is within the limit. The counter expires after the window.
+func (r *Redis) RateLimit(ctx context.Context, key string, limit int64, window time.Duration) (bool, error) {
+	const script = `
+local n = redis.call('INCR', KEYS[1])
+if n == 1 then redis.call('EXPIRE', KEYS[1], ARGV[1]) end
+return n`
+	n, err := r.client.Eval(ctx, script, []string{key}, int64(window.Seconds())).Int64()
+	if err != nil {
+		return false, err
+	}
+	return n <= limit, nil
+}
+
 // Close releases the client.
 func (r *Redis) Close() error { return r.client.Close() }

@@ -31,6 +31,7 @@ type Simulation struct {
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
 	CompletedAt  pgtype.Timestamptz `json:"completed_at"`
+	OwnerID      pgtype.Text        `json:"owner_id"`
 }
 
 type Snapshot struct {
@@ -41,4 +42,12 @@ type Snapshot struct {
 	Data          []byte             `json:"data"`
 	Checksum      string             `json:"checksum"`
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+}
+
+type User struct {
+	ID           string             `json:"id"`
+	Username     string             `json:"username"`
+	PasswordHash string             `json:"password_hash"`
+	Role         string             `json:"role"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 }

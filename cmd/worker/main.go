@@ -13,6 +13,7 @@ import (
 	"github.com/ripper19/simulator/examples/counter"
 	"github.com/ripper19/simulator/internal/broker"
 	"github.com/ripper19/simulator/internal/coord"
+	"github.com/ripper19/simulator/internal/metrics"
 	"github.com/ripper19/simulator/internal/queue"
 	"github.com/ripper19/simulator/internal/registry"
 	"github.com/ripper19/simulator/internal/workers"
@@ -57,9 +58,12 @@ func main() {
 	})
 
 	q := queue.New(br, c, 0)
+	met := metrics.New(nil)
+	q.SetMetrics(met)
 	svc := workers.NewService(workers.NewInfo(workerID, "0.1.0"), c, q, func(ctx context.Context, job queue.Job) error {
 		return workers.RunJob(ctx, reg, q, job)
 	})
+	svc.SetMetrics(met)
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()

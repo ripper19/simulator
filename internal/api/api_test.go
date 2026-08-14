@@ -42,31 +42,44 @@ func newTestServer(t *testing.T) *httptest.Server {
 
 func doJSON(t *testing.T, method, url string, body any) (int, []byte) {
 	t.Helper()
-	var r io.Reader
-	if body != nil {
-		b, err := json.Marshal(body)
-		if err != nil {
-			t.Fatal(err)
-		}
-		r = bytes.NewReader(b)
-	}
-	req, err := http.NewRequest(method, url, r)
+	req, err := newJSONRequest(method, url, body)
 	if err != nil {
 		t.Fatal(err)
-	}
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer resp.Body.Close()
+	return resp.StatusCode, readAll(t, resp)
+}
+
+func newJSONRequest(method, url string, body any) (*http.Request, error) {
+	var r io.Reader
+	if body != nil {
+		b, err := json.Marshal(body)
+		if err != nil {
+			return nil, err
+		}
+		r = bytes.NewReader(b)
+	}
+	req, err := http.NewRequest(method, url, r)
+	if err != nil {
+		return nil, err
+	}
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	return req, nil
+}
+
+func readAll(t *testing.T, resp *http.Response) []byte {
+	t.Helper()
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return resp.StatusCode, data
+	return data
 }
 
 func TestModelsList(t *testing.T) {

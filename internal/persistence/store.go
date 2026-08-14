@@ -36,9 +36,19 @@ type SimulationInfo struct {
 	Mode         string          `json:"mode"`
 	Status       string          `json:"status"`
 	Config       json.RawMessage `json:"config,omitempty"`
+	OwnerID      *string         `json:"owner_id,omitempty"`
 	CreatedAt    time.Time       `json:"created_at"`
 	UpdatedAt    time.Time       `json:"updated_at"`
 	CompletedAt  *time.Time      `json:"completed_at,omitempty"`
+}
+
+// UserInfo is a durable user record.
+type UserInfo struct {
+	ID           string    `json:"id"`
+	Username     string    `json:"username"`
+	PasswordHash string    `json:"-"`
+	Role         string    `json:"role"`
+	CreatedAt    time.Time `json:"created_at"`
 }
 
 // SnapshotInfo is a durable snapshot record.
@@ -138,6 +148,7 @@ func (s *Store) CreateSimulation(ctx context.Context, si SimulationInfo) (Simula
 		Mode:         si.Mode,
 		Status:       si.Status,
 		Config:       cfg,
+		OwnerID:      textPtr(si.OwnerID),
 	})
 	if err != nil {
 		return SimulationInfo{}, err
@@ -247,6 +258,7 @@ func simulationFromRow(r sqlc.Simulation) SimulationInfo {
 		Mode:         r.Mode,
 		Status:       r.Status,
 		Config:       r.Config,
+		OwnerID:      textFromPtr(r.OwnerID),
 		CreatedAt:    tsTime(r.CreatedAt),
 		UpdatedAt:    tsTime(r.UpdatedAt),
 		CompletedAt:  tsTimePtr(r.CompletedAt),
@@ -278,4 +290,54 @@ func tsTimePtr(t pgtype.Timestamptz) *time.Time {
 	}
 	tt := t.Time
 	return &tt
+}
+
+func textPtr(s *string) pgtype.Text {
+	if s == nil {
+		return pgtype.Text{}
+	}
+	return pgtype.Text{String: *s, Valid: true}
+}
+
+func textFromPtr(t pgtype.Text) *string {
+	if !t.Valid {
+		return nil
+	}
+	s := t.String
+	return &s
+}
+
+// ---- users ----
+
+// CreateUser persists a new user.
+func (s *Store) CreateUser(ctx context.Context, u UserInfo) (UserInfo, error) {
+	r, err := s.q.CreateUser(ctx, sqlc.CreateUserParams{
+		ID:           u.ID,
+		Username:     u.Username,
+		PasswordHash: u.PasswordHash,
+		Role:         u.Role,
+	})
+	if err != nil {
+		return UserInfo{}, err
+	}
+	return userFromRow(r), nil
+}
+
+// GetUserByUsername returns a user by username.
+func (s *Store) GetUserByUsername(ctx context.Context, username string) (UserInfo, error) {
+	r, err := s.q.GetUserByUsername(ctx, username)
+	if err != nil {
+		return UserInfo{}, err
+	}
+	return userFromRow(r), nil
+}
+
+func userFromRow(r sqlc.User) UserInfo {
+	return UserInfo{
+		ID:           r.ID,
+		Username:     r.Username,
+		PasswordHash: r.PasswordHash,
+		Role:         r.Role,
+		CreatedAt:    tsTime(r.CreatedAt),
+	}
 }

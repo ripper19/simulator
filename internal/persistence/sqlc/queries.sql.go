@@ -7,22 +7,25 @@ package sqlc
 
 import (
 	"context"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const createSimulation = `-- name: CreateSimulation :one
-INSERT INTO simulations (id, model_id, model_version, seed, mode, status, config)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
-RETURNING id, model_id, model_version, seed, mode, status, config, created_at, updated_at, completed_at
+INSERT INTO simulations (id, model_id, model_version, seed, mode, status, config, owner_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+RETURNING id, model_id, model_version, seed, mode, status, config, created_at, updated_at, completed_at, owner_id
 `
 
 type CreateSimulationParams struct {
-	ID           string `json:"id"`
-	ModelID      string `json:"model_id"`
-	ModelVersion string `json:"model_version"`
-	Seed         int64  `json:"seed"`
-	Mode         string `json:"mode"`
-	Status       string `json:"status"`
-	Config       []byte `json:"config"`
+	ID           string      `json:"id"`
+	ModelID      string      `json:"model_id"`
+	ModelVersion string      `json:"model_version"`
+	Seed         int64       `json:"seed"`
+	Mode         string      `json:"mode"`
+	Status       string      `json:"status"`
+	Config       []byte      `json:"config"`
+	OwnerID      pgtype.Text `json:"owner_id"`
 }
 
 func (q *Queries) CreateSimulation(ctx context.Context, arg CreateSimulationParams) (Simulation, error) {
@@ -34,6 +37,7 @@ func (q *Queries) CreateSimulation(ctx context.Context, arg CreateSimulationPara
 		arg.Mode,
 		arg.Status,
 		arg.Config,
+		arg.OwnerID,
 	)
 	var i Simulation
 	err := row.Scan(
@@ -47,6 +51,37 @@ func (q *Queries) CreateSimulation(ctx context.Context, arg CreateSimulationPara
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.CompletedAt,
+		&i.OwnerID,
+	)
+	return i, err
+}
+
+const createUser = `-- name: CreateUser :one
+INSERT INTO users (id, username, password_hash, role) VALUES ($1, $2, $3, $4)
+RETURNING id, username, password_hash, role, created_at
+`
+
+type CreateUserParams struct {
+	ID           string `json:"id"`
+	Username     string `json:"username"`
+	PasswordHash string `json:"password_hash"`
+	Role         string `json:"role"`
+}
+
+func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, error) {
+	row := q.db.QueryRow(ctx, createUser,
+		arg.ID,
+		arg.Username,
+		arg.PasswordHash,
+		arg.Role,
+	)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Username,
+		&i.PasswordHash,
+		&i.Role,
+		&i.CreatedAt,
 	)
 	return i, err
 }
@@ -89,7 +124,7 @@ func (q *Queries) GetModel(ctx context.Context, arg GetModelParams) (Model, erro
 }
 
 const getSimulation = `-- name: GetSimulation :one
-SELECT id, model_id, model_version, seed, mode, status, config, created_at, updated_at, completed_at
+SELECT id, model_id, model_version, seed, mode, status, config, created_at, updated_at, completed_at, owner_id
 FROM simulations
 WHERE id = $1
 `
@@ -108,6 +143,7 @@ func (q *Queries) GetSimulation(ctx context.Context, id string) (Simulation, err
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.CompletedAt,
+		&i.OwnerID,
 	)
 	return i, err
 }
@@ -128,6 +164,40 @@ func (q *Queries) GetSnapshot(ctx context.Context, id string) (Snapshot, error) 
 		&i.EngineVersion,
 		&i.Data,
 		&i.Checksum,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getUser = `-- name: GetUser :one
+SELECT id, username, password_hash, role, created_at FROM users WHERE id = $1
+`
+
+func (q *Queries) GetUser(ctx context.Context, id string) (User, error) {
+	row := q.db.QueryRow(ctx, getUser, id)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Username,
+		&i.PasswordHash,
+		&i.Role,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getUserByUsername = `-- name: GetUserByUsername :one
+SELECT id, username, password_hash, role, created_at FROM users WHERE username = $1
+`
+
+func (q *Queries) GetUserByUsername(ctx context.Context, username string) (User, error) {
+	row := q.db.QueryRow(ctx, getUserByUsername, username)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Username,
+		&i.PasswordHash,
+		&i.Role,
 		&i.CreatedAt,
 	)
 	return i, err
@@ -207,7 +277,7 @@ func (q *Queries) ListModels(ctx context.Context) ([]Model, error) {
 }
 
 const listSimulations = `-- name: ListSimulations :many
-SELECT id, model_id, model_version, seed, mode, status, config, created_at, updated_at, completed_at
+SELECT id, model_id, model_version, seed, mode, status, config, created_at, updated_at, completed_at, owner_id
 FROM simulations
 ORDER BY created_at DESC
 `
@@ -232,6 +302,7 @@ func (q *Queries) ListSimulations(ctx context.Context) ([]Simulation, error) {
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.CompletedAt,
+			&i.OwnerID,
 		); err != nil {
 			return nil, err
 		}
@@ -310,7 +381,7 @@ SET status = $2,
     updated_at = now(),
     completed_at = CASE WHEN $2 IN ('completed', 'failed', 'stopped') THEN now() ELSE completed_at END
 WHERE id = $1
-RETURNING id, model_id, model_version, seed, mode, status, config, created_at, updated_at, completed_at
+RETURNING id, model_id, model_version, seed, mode, status, config, created_at, updated_at, completed_at, owner_id
 `
 
 type UpdateSimulationStatusParams struct {
@@ -332,6 +403,7 @@ func (q *Queries) UpdateSimulationStatus(ctx context.Context, arg UpdateSimulati
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.CompletedAt,
+		&i.OwnerID,
 	)
 	return i, err
 }
