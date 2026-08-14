@@ -96,6 +96,11 @@ func (q *Queue) PublishResult(ctx context.Context, r Result) error {
 
 // Consume delivers jobs to handler, applying idempotency, retries, backoff, and
 // dead-lettering. It blocks until ctx is cancelled.
+//
+// Idempotency: the job's processed key is claimed before execution and, on
+// failure, released again so the retry can re-claim it (otherwise a failed
+// first attempt would swallow every retry). On success the claim persists as
+// the 24h processed marker.
 func (q *Queue) Consume(ctx context.Context, handler func(ctx context.Context, job Job) error) error {
 	return q.broker.Consume(ctx, QueueJobs, func(ctx context.Context, d broker.Delivery) error {
 		var job Job
@@ -104,10 +109,9 @@ func (q *Queue) Consume(ctx context.Context, handler func(ctx context.Context, j
 			return nil
 		}
 
-		// Idempotency: process each job ID at most once, even across duplicate
-		// or redelivered messages.
+		key := "job:processed:" + job.ID
 		if q.coord != nil {
-			claimed, err := q.coord.Claim(ctx, "job:processed:"+job.ID, "1", 24*time.Hour)
+			claimed, err := q.coord.Claim(ctx, key, "1", 24*time.Hour)
 			if err == nil && !claimed {
 				_ = d.Ack()
 				return nil
@@ -115,6 +119,9 @@ func (q *Queue) Consume(ctx context.Context, handler func(ctx context.Context, j
 		}
 
 		if err := handler(ctx, job); err != nil {
+			if q.coord != nil {
+				_ = q.coord.Release(ctx, key)
+			}
 			q.handleFailure(ctx, d, job, err)
 			return nil
 		}

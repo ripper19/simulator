@@ -313,40 +313,29 @@ func (m *Manager) Start(ctx context.Context, id string) error {
 
 // Pause suspends a running simulation.
 func (m *Manager) Pause(ctx context.Context, id string) error {
-	mg, err := m.lookup(id)
-	if err != nil {
-		return err
-	}
-	if err := mg.sim.Pause(); err != nil {
-		return err
-	}
-	m.updateStatus(id, "paused")
-	return nil
+	return m.control(id, "paused", (*simulation.Simulation).Pause)
 }
 
 // Resume continues a paused simulation.
 func (m *Manager) Resume(ctx context.Context, id string) error {
-	mg, err := m.lookup(id)
-	if err != nil {
-		return err
-	}
-	if err := mg.sim.Resume(); err != nil {
-		return err
-	}
-	m.updateStatus(id, "running")
-	return nil
+	return m.control(id, "running", (*simulation.Simulation).Resume)
 }
 
 // Stop halts a simulation.
 func (m *Manager) Stop(ctx context.Context, id string) error {
+	return m.control(id, "stopped", (*simulation.Simulation).Stop)
+}
+
+// control applies a simulation operation and records the resulting status.
+func (m *Manager) control(id, status string, f func(*simulation.Simulation) error) error {
 	mg, err := m.lookup(id)
 	if err != nil {
 		return err
 	}
-	if err := mg.sim.Stop(); err != nil {
+	if err := f(mg.sim); err != nil {
 		return err
 	}
-	m.updateStatus(id, "stopped")
+	m.updateStatus(id, status)
 	return nil
 }
 

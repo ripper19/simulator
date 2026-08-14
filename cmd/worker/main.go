@@ -65,7 +65,7 @@ func main() {
 	defer cancel()
 
 	logger.Info("worker starting", "id", svc.Info().ID, "broker", brokerKind, "redis", redisAddr != "")
-	if err := svc.Run(ctx); err != nil {
+	if err := svc.Run(ctx); err != nil && ctx.Err() == nil {
 		logger.Error("worker", "err", err)
 		os.Exit(1)
 	}

@@ -50,5 +50,10 @@ func (r *Redis) Claim(ctx context.Context, key, value string, ttl time.Duration)
 	return r.client.SetNX(ctx, key, value, ttl).Result()
 }
 
+// Release removes a previously claimed key, allowing a future Claim to succeed.
+func (r *Redis) Release(ctx context.Context, key string) error {
+	return r.client.Del(ctx, key).Err()
+}
+
 // Close releases the client.
 func (r *Redis) Close() error { return r.client.Close() }

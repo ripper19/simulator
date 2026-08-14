@@ -111,26 +111,9 @@ func (s *scheduler) run(ctx context.Context, w *World) error {
 
 // runLevelParallel runs several independent systems concurrently.
 func (s *scheduler) runLevelParallel(ctx context.Context, w *World, level []int) error {
-	var wg sync.WaitGroup
-	errCh := make(chan error, len(level))
-	for _, idx := range level {
-		idx := idx
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			if err := s.runSystem(ctx, w, idx); err != nil {
-				errCh <- err
-			}
-		}()
-	}
-	wg.Wait()
-	close(errCh)
-	for err := range errCh {
-		if err != nil {
-			return err
-		}
-	}
-	return nil
+	return runConcurrent(ctx, len(level), func(ctx context.Context, i int) error {
+		return s.runSystem(ctx, w, level[i])
+	})
 }
 
 // runSystem partitions the system's entity set into shards and runs them on a
@@ -147,21 +130,27 @@ func (s *scheduler) runSystem(ctx context.Context, w *World, idx int) error {
 	}
 
 	sem := make(chan struct{}, s.workers)
+	return runConcurrent(ctx, len(shards), func(ctx context.Context, i int) error {
+		select {
+		case sem <- struct{}{}:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+		defer func() { <-sem }()
+		return sys.Run(ctx, w, shards[i])
+	})
+}
+
+// runConcurrent runs n tasks concurrently, returning the first error (or nil).
+func runConcurrent(ctx context.Context, n int, fn func(ctx context.Context, i int) error) error {
 	var wg sync.WaitGroup
-	errCh := make(chan error, len(shards))
-	for _, shard := range shards {
-		shard := shard
+	errCh := make(chan error, n)
+	for i := 0; i < n; i++ {
+		i := i
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			select {
-			case sem <- struct{}{}:
-			case <-ctx.Done():
-				errCh <- ctx.Err()
-				return
-			}
-			defer func() { <-sem }()
-			if err := sys.Run(ctx, w, shard); err != nil {
+			if err := fn(ctx, i); err != nil {
 				errCh <- err
 			}
 		}()

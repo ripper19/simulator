@@ -41,9 +41,9 @@ func main() {
 	case "step":
 		err = doAction(base, args, "step")
 	case "status":
-		err = doStatus(base, args)
+		err = doGet(base, args, "state")
 	case "metrics":
-		err = doMetrics(base, args)
+		err = doGet(base, args, "metrics")
 	case "snapshot":
 		err = doSnapshot(base, args)
 	case "restore":
@@ -141,20 +141,12 @@ func doAction(base string, args []string, action string) error {
 	return postAndPrint(fmt.Sprintf("%s/api/v1/simulations/%s/%s", base, id, action), nil)
 }
 
-func doStatus(base string, args []string) error {
-	id, err := requireID(args, "status")
+func doGet(base string, args []string, sub string) error {
+	id, err := requireID(args, sub)
 	if err != nil {
 		return err
 	}
-	return getAndPrint(base + "/api/v1/simulations/" + id + "/state")
-}
-
-func doMetrics(base string, args []string) error {
-	id, err := requireID(args, "metrics")
-	if err != nil {
-		return err
-	}
-	return getAndPrint(base + "/api/v1/simulations/" + id + "/metrics")
+	return getAndPrint(base + "/api/v1/simulations/" + id + "/" + sub)
 }
 
 func doSnapshot(base string, args []string) error {

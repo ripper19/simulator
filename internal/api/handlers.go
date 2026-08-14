@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"time"
@@ -74,44 +75,15 @@ func (s *Server) deleteSimulation(w http.ResponseWriter, r *http.Request) {
 
 // ---- lifecycle ----
 
-func (s *Server) startSimulation(w http.ResponseWriter, r *http.Request) {
-	if err := s.manager.Start(r.Context(), chi.URLParam(r, "id")); err != nil {
-		writeError(w, err)
-		return
+// action adapts a manager lifecycle operation to an HTTP handler.
+func (s *Server) action(f func(context.Context, string) error, code int, status string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if err := f(r.Context(), chi.URLParam(r, "id")); err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, code, map[string]string{"status": status})
 	}
-	writeJSON(w, http.StatusAccepted, map[string]string{"status": "started"})
-}
-
-func (s *Server) pauseSimulation(w http.ResponseWriter, r *http.Request) {
-	if err := s.manager.Pause(r.Context(), chi.URLParam(r, "id")); err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "paused"})
-}
-
-func (s *Server) resumeSimulation(w http.ResponseWriter, r *http.Request) {
-	if err := s.manager.Resume(r.Context(), chi.URLParam(r, "id")); err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "resumed"})
-}
-
-func (s *Server) stopSimulation(w http.ResponseWriter, r *http.Request) {
-	if err := s.manager.Stop(r.Context(), chi.URLParam(r, "id")); err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "stopped"})
-}
-
-func (s *Server) stepSimulation(w http.ResponseWriter, r *http.Request) {
-	if err := s.manager.Step(r.Context(), chi.URLParam(r, "id")); err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "stepped"})
 }
 
 func (s *Server) snapshotSimulation(w http.ResponseWriter, r *http.Request) {
@@ -134,14 +106,6 @@ func (s *Server) restoreSimulation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "restored"})
-}
-
-func (s *Server) replaySimulation(w http.ResponseWriter, r *http.Request) {
-	if err := s.manager.Replay(r.Context(), chi.URLParam(r, "id")); err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "replayed"})
 }
 
 // ---- state / events / metrics / stream ----
