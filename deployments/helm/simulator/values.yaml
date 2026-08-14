@@ -1,0 +1,42 @@
+replicaCount: 1
+
+api:
+  image:
+    repository: simulator-api
+    tag: latest
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    port: 8080
+
+worker:
+  replicaCount: 2
+  image:
+    repository: simulator-worker
+    tag: latest
+    pullPolicy: IfNotPresent
+
+config:
+  databaseUrl: "postgres://simulator:simulator_dev_pw@postgres:5432/simulator?sslmode=disable"
+  redisAddr: "redis:6379"
+  amqpUrl: "amqp://simulator:simulator_dev_pw@rabbitmq:5672/"
+  httpAddr: ":8080"
+
+jwt:
+  secret: "change-me"
+
+resources:
+  api:
+    limits:
+      cpu: "1"
+      memory: 512Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+  worker:
+    limits:
+      cpu: "1"
+      memory: 512Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
