@@ -1,6 +1,7 @@
 package simulation
 
 import (
+	"encoding/json"
 	"fmt"
 	"sync"
 )
@@ -107,6 +108,67 @@ func (s *ComponentStore) Entities(id ComponentID) []EntityID {
 		return nil
 	}
 	return lister.entityIDs()
+}
+
+// snapshotJSONer and restoreJSONer are implemented by every *Column[T].
+type snapshotJSONer interface {
+	snapshotJSON() ([]EntityID, []byte, error)
+}
+type restoreJSONer interface {
+	restoreJSON([]EntityID, []byte) error
+}
+
+// Snapshot serializes every registered component column in ID order, returning
+// name, entities, and JSON-encoded values for each.
+func (s *ComponentStore) Snapshot() ([]componentSnapshot, error) {
+	s.mu.RLock()
+	n := len(s.names)
+	s.mu.RUnlock()
+
+	var out []componentSnapshot
+	for id := ComponentID(0); int(id) < n; id++ {
+		s.mu.RLock()
+		col, ok := s.cols[id]
+		name := s.names[id]
+		s.mu.RUnlock()
+		if !ok {
+			continue
+		}
+		enc, ok := col.(snapshotJSONer)
+		if !ok {
+			continue
+		}
+		entities, values, err := enc.snapshotJSON()
+		if err != nil {
+			return nil, fmt.Errorf("simulation: snapshot component %q: %w", name, err)
+		}
+		out = append(out, componentSnapshot{Name: name, Entities: entities, Values: values})
+	}
+	return out, nil
+}
+
+// Restore replaces the contents of registered component columns from a snapshot.
+func (s *ComponentStore) Restore(snaps []componentSnapshot) error {
+	for _, snap := range snaps {
+		s.mu.RLock()
+		id, ok := s.byName[snap.Name]
+		var col any
+		if ok {
+			col = s.cols[id]
+		}
+		s.mu.RUnlock()
+		if !ok {
+			return fmt.Errorf("simulation: unknown component %q in snapshot", snap.Name)
+		}
+		dec, ok := col.(restoreJSONer)
+		if !ok {
+			return fmt.Errorf("simulation: component %q not restorable", snap.Name)
+		}
+		if err := dec.restoreJSON(snap.Entities, snap.Values); err != nil {
+			return fmt.Errorf("simulation: restore component %q: %w", snap.Name, err)
+		}
+	}
+	return nil
 }
 
 // Column is a struct-of-arrays column holding the values of one component type
@@ -254,6 +316,43 @@ func (c *Column[T]) entityIDs() []EntityID {
 	out := make([]EntityID, len(c.dense))
 	copy(out, c.dense)
 	return out
+}
+
+// snapshotJSON returns the column's entities (dense order) and its values
+// serialized as JSON, for snapshot persistence.
+func (c *Column[T]) snapshotJSON() ([]EntityID, []byte, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	entities := append([]EntityID(nil), c.dense...)
+	data, err := json.Marshal(c.data)
+	return entities, data, err
+}
+
+// restoreJSON replaces the column's contents from a snapshot: entities (dense
+// order) and the JSON-encoded values. It rebuilds the sparse index.
+func (c *Column[T]) restoreJSON(entities []EntityID, data []byte) error {
+	var vs []T
+	if err := json.Unmarshal(data, &vs); err != nil {
+		return err
+	}
+	if len(vs) != len(entities) {
+		return fmt.Errorf("simulation: component restore length mismatch: %d entities, %d values", len(entities), len(vs))
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.dense = append([]EntityID(nil), entities...)
+	c.data = append([]T(nil), vs...)
+	var maxIdx uint32
+	for _, e := range entities {
+		if e.Index() > maxIdx {
+			maxIdx = e.Index()
+		}
+	}
+	c.sparse = make([]int32, int(maxIdx)+1)
+	for pos, e := range entities {
+		c.sparse[e.Index()] = int32(pos + 1)
+	}
+	return nil
 }
 
 // growInt32 ensures the sparse slice can index idx, growing capacity

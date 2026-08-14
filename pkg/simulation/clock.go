@@ -42,3 +42,12 @@ func (c *Clock) AdvanceTime(t float64) {
 	defer c.mu.Unlock()
 	c.time = t
 }
+
+// Set sets both the tick counter and simulation time, used when restoring a
+// snapshot.
+func (c *Clock) Set(tick uint64, t float64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.tick = tick
+	c.time = t
+}
