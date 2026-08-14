@@ -172,7 +172,7 @@ func TestStartToCompletionAndSnapshot(t *testing.T) {
 
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		code, data = doJSON(t, "GET", srv.URL+"/api/v1/simulations/"+info.ID+"/state", nil)
+		_, data = doJSON(t, "GET", srv.URL+"/api/v1/simulations/"+info.ID+"/state", nil)
 		var st runner.State
 		json.Unmarshal(data, &st)
 		if st.Status == "completed" || st.Status == "failed" {
@@ -234,7 +234,7 @@ func TestSimulationRecordReflectsLiveStatus(t *testing.T) {
 
 	doJSON(t, "POST", srv.URL+"/api/v1/simulations/"+info.ID+"/start", nil)
 
-	code, data = doJSON(t, "GET", srv.URL+"/api/v1/simulations/"+info.ID, nil)
+	_, data = doJSON(t, "GET", srv.URL+"/api/v1/simulations/"+info.ID, nil)
 	var got persistence.SimulationInfo
 	json.Unmarshal(data, &got)
 	if got.Status != "running" {
@@ -243,7 +243,7 @@ func TestSimulationRecordReflectsLiveStatus(t *testing.T) {
 
 	doJSON(t, "POST", srv.URL+"/api/v1/simulations/"+info.ID+"/stop", nil)
 
-	code, data = doJSON(t, "GET", srv.URL+"/api/v1/simulations/"+info.ID, nil)
+	_, data = doJSON(t, "GET", srv.URL+"/api/v1/simulations/"+info.ID, nil)
 	json.Unmarshal(data, &got)
 	if got.Status != "stopped" {
 		t.Fatalf("record status after stop = %q, want stopped", got.Status)
@@ -254,14 +254,14 @@ func TestDeleteSimulation(t *testing.T) {
 	srv := newTestServer(t)
 	defer srv.Close()
 
-	code, data := doJSON(t, "POST", srv.URL+"/api/v1/simulations", map[string]any{
+	_, data := doJSON(t, "POST", srv.URL+"/api/v1/simulations", map[string]any{
 		"model_id": "counter",
 		"seed":     1,
 	})
 	var info persistence.SimulationInfo
 	json.Unmarshal(data, &info)
 
-	code, _ = doJSON(t, "DELETE", srv.URL+"/api/v1/simulations/"+info.ID, nil)
+	code, _ := doJSON(t, "DELETE", srv.URL+"/api/v1/simulations/"+info.ID, nil)
 	if code != http.StatusNoContent {
 		t.Fatalf("delete status = %d, want 204", code)
 	}

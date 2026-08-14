@@ -8,7 +8,10 @@ import { check } from 'k6';
 // Scale:
 //   k6 run --vus 100  --duration 30s -e BASE_URL=... tests/load/simulations.js
 //   k6 run --vus 1000 --duration 30s -e BASE_URL=... tests/load/simulations.js
-//   k6 run --vus 5000 --duration 30s -e BASE_URL=... tests/load/simulations.js
+//
+// Note: creation is rate-limited (60/min per IP) when the API runs with
+// REDIS_ADDR set. For raw-throughput runs, start the API without REDIS_ADDR
+// (or set RATE_LIMIT high) — see tests/load/README.md.
 //
 // Optionally authenticate by exporting a bearer token:
 //   k6 run -e BASE_URL=... -e TOKEN=<jwt> tests/load/simulations.js
@@ -34,6 +37,7 @@ export default function () {
   const body = JSON.stringify({
     model_id: 'counter',
     seed: Math.floor(Math.random() * 1e9),
+    max_ticks: 1000,
     config: { n: 100 },
   });
 
@@ -48,4 +52,7 @@ export default function () {
   http.get(`${BASE}/api/v1/simulations/${id}/state`, { headers: headers(false) });
   http.get(`${BASE}/api/v1/simulations/${id}/metrics`, { headers: headers(false) });
   http.get(`${BASE}/api/v1/models`, { headers: headers(false) });
+  // Stop and delete so simulations do not accumulate for the server's lifetime.
+  http.post(`${BASE}/api/v1/simulations/${id}/stop`, null, { headers: headers(false) });
+  http.del(`${BASE}/api/v1/simulations/${id}`, null, { headers: headers(false) });
 }
