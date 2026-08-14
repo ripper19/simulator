@@ -4,11 +4,12 @@ An open, general-purpose distributed simulation runtime written in Go for
 executing deterministic, extensible simulations locally or across a scalable
 worker cluster.
 
-> **Status: Phase 2** — core engine (entities, SoA components, events, clock,
+> **Status: Phase 3** — core engine (entities, SoA components, events, clock,
 > deterministic randomness, and the simulation runtime), the discrete-event
-> engine (priority event queue, immediate/delayed/prioritized scheduling), and
-> the `CounterWorld` test model. Later phases add parallel execution, snapshots,
-> persistence, REST API, distributed workers, and observability.
+> engine (priority queue, immediate/delayed/prioritized scheduling), and
+> deterministic parallel execution (a `System` abstraction with dependency
+> ordering and sharded workers). Later phases add snapshots, persistence, REST
+> API, distributed workers, and observability.
 
 ## What this is
 
@@ -69,6 +70,25 @@ execution parameters. Randomness flows from a single master seed into named,
 order-independent streams; there is no global RNG. Event ordering is a total
 order on `(time, priority, sequence, id)`. See the determinism tests in
 `examples/counter/counter_test.go`.
+
+## Systems & parallel execution
+
+A tick-mode model may decompose each tick into `System`s (via
+`simulation.SystemModel`). Each system declares the components it reads and
+writes; the scheduler orders systems by dependency (conflicting systems
+serialize) and runs independent work in parallel across a bounded worker pool,
+partitioning entities into contiguous, disjoint shards. Parallel execution is
+deterministic: results are identical regardless of worker count (verified by
+`TestCounterWorldParallelDeterministic`). Within a parallel shard, systems use
+`Column.GetShard`/`SetShard` (lock-free, safe because shards own disjoint
+entities).
+
+Run the benchmark (results depend on hardware; a 2-core machine gives ~1.5x
+parallel speedup on `CounterWorld`, which is memory-bound):
+
+```sh
+go test -run '^$' -bench BenchmarkCounterTick -benchmem ./examples/counter
+```
 
 ## Verification
 

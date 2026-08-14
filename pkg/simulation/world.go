@@ -1,6 +1,10 @@
 package simulation
 
-import "github.com/ripper19/simulator/pkg/model"
+import (
+	"sync/atomic"
+
+	"github.com/ripper19/simulator/pkg/model"
+)
 
 // Metadata records the provenance of a running simulation, which is required
 // to reproduce a run.
@@ -28,11 +32,21 @@ type World struct {
 	Clock      *Clock
 	Random     *RandomStreams
 	Meta       Metadata
+
+	// revision increments on every structural change (entity create/destroy,
+	// component add/remove). It lets the scheduler cache derived data (such as a
+	// system's entity set) and invalidate only when structure changes.
+	revision atomic.Uint64
 }
+
+func (w *World) bump() { w.revision.Add(1) }
+
+// Revision returns the current structural revision.
+func (w *World) Revision() uint64 { return w.revision.Load() }
 
 // NewWorld creates an empty World rooted at the given seed.
 func NewWorld(id string, seed uint64) *World {
-	return &World{
+	w := &World{
 		ID:         id,
 		Entities:   NewEntityManager(),
 		Components: NewComponentStore(),
@@ -43,4 +57,7 @@ func NewWorld(id string, seed uint64) *World {
 		Clock:      NewClock(),
 		Random:     NewRandomStreams(seed),
 	}
+	w.Entities.bump = w.bump
+	w.Components.bump = w.bump
+	return w
 }

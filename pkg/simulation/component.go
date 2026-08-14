@@ -19,6 +19,7 @@ type ComponentStore struct {
 	names  []string
 	byName map[string]ComponentID
 	cols   map[ComponentID]any
+	bump   func() // optional structural-revision callback
 }
 
 // NewComponentStore returns an empty component store.
@@ -72,7 +73,7 @@ func columnOf[T any](store *ComponentStore, id ComponentID, create bool) *Column
 	if col, ok := store.cols[id]; ok {
 		return col.(*Column[T])
 	}
-	c := &Column[T]{}
+	c := &Column[T]{bump: store.bump}
 	store.cols[id] = c
 	return c
 }
@@ -92,6 +93,22 @@ func RegisterComponent[T any](store *ComponentStore, name string) (ComponentID, 
 	return id, columnOf[T](store, id, true)
 }
 
+// Entities returns the entity IDs that currently hold the component identified
+// by id, in dense (insertion) order, or nil if the component is unknown.
+func (s *ComponentStore) Entities(id ComponentID) []EntityID {
+	s.mu.RLock()
+	col, ok := s.cols[id]
+	s.mu.RUnlock()
+	if !ok {
+		return nil
+	}
+	lister, ok := col.(interface{ entityIDs() []EntityID })
+	if !ok {
+		return nil
+	}
+	return lister.entityIDs()
+}
+
 // Column is a struct-of-arrays column holding the values of one component type
 // across entities. It uses a sparse-set index: data and dense are parallel
 // arrays indexed by "dense position", and sparse maps an entity index to its
@@ -105,6 +122,7 @@ type Column[T any] struct {
 	sparse []int32
 	dense  []EntityID
 	data   []T
+	bump   func() // optional structural-revision callback
 }
 
 // Set writes v for entity e, adding it if absent.
@@ -119,6 +137,9 @@ func (c *Column[T]) Set(e EntityID, v T) {
 		c.sparse[idx] = int32(len(c.data) + 1)
 		c.dense = append(c.dense, e)
 		c.data = append(c.data, v)
+		if c.bump != nil {
+			c.bump()
+		}
 		return
 	}
 	c.data[c.sparse[idx]-1] = v
@@ -172,6 +193,9 @@ func (c *Column[T]) Remove(e EntityID) bool {
 	c.data = c.data[:last]
 	c.dense = c.dense[:last]
 	c.sparse[idx] = 0
+	if c.bump != nil {
+		c.bump()
+	}
 	return true
 }
 
@@ -196,17 +220,60 @@ func (c *Column[T]) Len() int {
 	return len(c.data)
 }
 
+// GetShard reads the value for e without taking the column lock. It is safe
+// only when each entity is accessed by at most one goroutine and no component
+// membership changes occur concurrently — precisely the guarantee the scheduler
+// provides within parallel System.Run shards. Mixing GetShard/SetShard with the
+// locked accessors on the same column concurrently is a programming error.
+func (c *Column[T]) GetShard(e EntityID) (T, bool) {
+	idx := e.Index()
+	if int(idx) >= len(c.sparse) || c.sparse[idx] == 0 {
+		var zero T
+		return zero, false
+	}
+	return c.data[c.sparse[idx]-1], true
+}
+
+// SetShard writes v for e without taking the column lock, under the same
+// shard-disjointness guarantee as GetShard. It panics if e does not already
+// hold the component, because adding a component would mutate the column
+// structure (dense/sparse) and break the guarantee.
+func (c *Column[T]) SetShard(e EntityID, v T) {
+	idx := e.Index()
+	if int(idx) >= len(c.sparse) || c.sparse[idx] == 0 {
+		panic("simulation: SetShard on absent component (membership change in parallel section)")
+	}
+	c.data[c.sparse[idx]-1] = v
+}
+
+// entityIDs returns a snapshot of the entities holding this component, in dense
+// order. Used by ComponentStore.Entities for scheduler partitioning.
+func (c *Column[T]) entityIDs() []EntityID {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	out := make([]EntityID, len(c.dense))
+	copy(out, c.dense)
+	return out
+}
+
+// growInt32 ensures the sparse slice can index idx, growing capacity
+// geometrically (amortized O(1)) and zeroing any newly-visible elements.
 func growInt32(s []int32, idx uint32) []int32 {
-	n := len(s)
 	target := int(idx) + 1
-	if n >= target {
+	if len(s) >= target {
 		return s
 	}
-	capNeed := target
-	if capNeed < n*2 {
-		capNeed = n * 2
+	if cap(s) >= target {
+		old := len(s)
+		s = s[:target]
+		clear(s[old:])
+		return s
 	}
-	ns := make([]int32, target, capNeed)
+	newCap := cap(s) * 2
+	if newCap < target {
+		newCap = target
+	}
+	ns := make([]int32, target, newCap)
 	copy(ns, s)
 	return ns
 }

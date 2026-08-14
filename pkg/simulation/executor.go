@@ -2,6 +2,7 @@ package simulation
 
 import (
 	"context"
+	"runtime"
 
 	"github.com/ripper19/simulator/pkg/model"
 )
@@ -23,6 +24,20 @@ type tickExecutor struct {
 
 func (e tickExecutor) step(ctx context.Context, w *World) (bool, error) {
 	if err := e.m.Step(ctx, w); err != nil {
+		return false, err
+	}
+	w.Clock.Advance()
+	return true, nil
+}
+
+// systemTickExecutor drives a SystemModel one tick per step, executing its
+// systems through the scheduler (which parallelizes independent work).
+type systemTickExecutor struct {
+	sched *scheduler
+}
+
+func (e *systemTickExecutor) step(ctx context.Context, w *World) (bool, error) {
+	if err := e.sched.run(ctx, w); err != nil {
 		return false, err
 	}
 	w.Clock.Advance()
@@ -51,6 +66,13 @@ func (e eventExecutor) step(ctx context.Context, w *World) (bool, error) {
 func newExecutor(cfg Config, m Model) (executor, error) {
 	switch cfg.Mode {
 	case model.ModeTick:
+		if sm, ok := m.(SystemModel); ok {
+			workers := cfg.Workers
+			if workers <= 0 {
+				workers = runtime.GOMAXPROCS(0)
+			}
+			return &systemTickExecutor{sched: newScheduler(sm.Systems(), workers)}, nil
+		}
 		tm, ok := m.(TickModel)
 		if !ok {
 			return nil, ErrBadMode

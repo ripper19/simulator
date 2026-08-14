@@ -20,4 +20,8 @@ type Config struct {
 	MaxTicks uint64
 	// MaxTime, if > 0, stops an event-mode run once simulation time reaches it.
 	MaxTime float64
+	// Workers sets the maximum parallelism for a model that implements
+	// SystemModel. 0 (default) means runtime.GOMAXPROCS(0). 1 forces fully
+	// serial execution of systems.
+	Workers int
 }
