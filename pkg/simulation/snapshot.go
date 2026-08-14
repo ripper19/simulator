@@ -27,10 +27,25 @@ type componentSnapshot struct {
 	Values   json.RawMessage `json:"values"`
 }
 
+// tagSnapshot is the serialized form of the tag registries: the tag names (in
+// ID order) and the per-entity tag bitsets.
+type tagSnapshot struct {
+	Names []string              `json:"names"`
+	Sets  map[EntityID][]uint64 `json:"sets"`
+}
+
+// resourceSnapshot is the serialized form of one resource: its Go type name and
+// JSON-encoded value.
+type resourceSnapshot struct {
+	Type  string          `json:"type"`
+	Value json.RawMessage `json:"value"`
+}
+
 // Snapshot is a complete, versioned, self-validating capture of a simulation's
 // state: provenance (IDs, model, seed, mode), clock, entity allocation state,
-// all component columns, and the event queue. A snapshot contains enough
-// information to restore execution deterministically.
+// all component columns, tags, resources, the event queue, and the model's own
+// configuration. A snapshot contains enough information to restore execution
+// deterministically.
 type Snapshot struct {
 	SchemaVersion int    `json:"schema_version"`
 	EngineVersion string `json:"engine_version"`
@@ -45,9 +60,12 @@ type Snapshot struct {
 	Tick uint64  `json:"tick"`
 	Time float64 `json:"time"`
 
-	Entities   entityManagerState  `json:"entities"`
-	Components []componentSnapshot `json:"components"`
-	Events     eventQueueState     `json:"events"`
+	Entities    entityManagerState  `json:"entities"`
+	Components  []componentSnapshot `json:"components"`
+	Tags        tagSnapshot         `json:"tags"`
+	Resources   []resourceSnapshot  `json:"resources"`
+	ModelConfig json.RawMessage     `json:"model_config,omitempty"`
+	Events      eventQueueState     `json:"events"`
 }
 
 // computeChecksum hashes the canonical JSON encoding of the snapshot (with the
@@ -82,14 +100,21 @@ func (s *Snapshot) Validate() error {
 	return nil
 }
 
-// Snapshot captures the current world state. The result is deterministic: two
-// worlds in an identical state produce identical snapshots.
+// Snapshot captures the current world state. It must be called when the world
+// is not being mutated (see Simulation.Snapshot, which enforces this). The
+// result is deterministic for a given state: two worlds in the same state
+// produce identical snapshots.
 func (w *World) Snapshot() (*Snapshot, error) {
 	components, err := w.Components.Snapshot()
 	if err != nil {
 		return nil, err
 	}
-	events, err := w.Events.snapshot()
+	resources, err := w.Resources.snapshot()
+	if err != nil {
+		return nil, err
+	}
+	payloadTypes := w.payloadTypeSet()
+	events, err := w.Events.snapshot(payloadTypes)
 	if err != nil {
 		return nil, err
 	}
@@ -105,6 +130,8 @@ func (w *World) Snapshot() (*Snapshot, error) {
 		Time:          w.Clock.Time(),
 		Entities:      w.Entities.snapshot(),
 		Components:    components,
+		Tags:          tagSnapshot{Names: w.Tags.snapshot(), Sets: w.TagStore.snapshot()},
+		Resources:     resources,
 		Events:        events,
 	}
 	checksum, err := s.computeChecksum()
@@ -130,25 +157,39 @@ func (w *World) Restore(s *Snapshot) error {
 	if s.Seed != w.Meta.Seed {
 		return fmt.Errorf("simulation: snapshot seed %d does not match world seed %d", s.Seed, w.Meta.Seed)
 	}
+	mode, err := modeFromString(s.Mode)
+	if err != nil {
+		return err
+	}
 
 	w.Entities.restore(s.Entities)
 	if err := w.Components.Restore(s.Components); err != nil {
 		return err
 	}
+	w.Tags.restore(s.Tags.Names)
+	w.TagStore.restore(s.Tags.Sets)
+	if err := w.Resources.restore(s.Resources); err != nil {
+		return err
+	}
 	w.Clock.Set(s.Tick, s.Time)
-	w.Events.restore(s.Events)
+	if err := w.Events.restore(s.Events, w.payloadTypeSet()); err != nil {
+		return err
+	}
 	w.Meta.SimulationID = s.SimulationID
-	w.Meta.Mode = modeFromString(s.Mode)
+	w.Meta.Mode = mode
+	// Bump the structural revision so any cached scheduler entity sets are
+	// invalidated after a restore that changes entity/component membership.
+	w.revision.Add(1)
 	return nil
 }
 
-func modeFromString(s string) model.Mode {
+func modeFromString(s string) (model.Mode, error) {
 	switch s {
 	case "tick":
-		return model.ModeTick
+		return model.ModeTick, nil
 	case "event":
-		return model.ModeEvent
+		return model.ModeEvent, nil
 	default:
-		return model.ModeTick
+		return 0, fmt.Errorf("simulation: snapshot has unknown mode %q", s)
 	}
 }

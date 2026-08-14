@@ -188,10 +188,6 @@ func TestEventModeMaxTimeBoundary(t *testing.T) {
 }
 
 func TestEventModeEmptyQueue(t *testing.T) {
-	type emptyModel struct{}
-	m := &emptyModel{}
-	// Reuse the metadata from cascadeModel via a small local model.
-	_ = m
 	em := &noEventModel{}
 	sim, err := New(context.Background(), Config{ID: "s", Seed: 1, Mode: model.ModeEvent}, em)
 	if err != nil {

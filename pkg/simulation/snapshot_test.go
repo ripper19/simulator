@@ -70,12 +70,14 @@ func TestEventQueueSnapshotRoundTrip(t *testing.T) {
 	q.Push(Event{Type: "b", Time: 2, Priority: 5})
 	q.Push(Event{Type: "c", Time: 1, Priority: 1, Payload: map[string]any{"k": "v"}})
 
-	st, err := q.snapshot()
+	st, err := q.snapshot(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	q2 := NewEventQueue()
-	q2.restore(st)
+	if err := q2.restore(st, nil); err != nil {
+		t.Fatal(err)
+	}
 
 	for {
 		e1, ok1 := q.Pop()

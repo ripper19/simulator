@@ -2,6 +2,7 @@ package simulation
 
 import (
 	"context"
+	"fmt"
 	"runtime"
 
 	"github.com/ripper19/simulator/pkg/model"
@@ -54,6 +55,9 @@ func (e eventExecutor) step(ctx context.Context, w *World) (bool, error) {
 	ev, ok := w.Events.Pop()
 	if !ok {
 		return false, nil
+	}
+	if ev.Time < w.Clock.Time() {
+		return false, fmt.Errorf("simulation: event %q at time %f scheduled in the past (clock %f)", ev.Type, ev.Time, w.Clock.Time())
 	}
 	w.Clock.AdvanceTime(ev.Time)
 	if err := e.m.HandleEvent(ctx, w, ev); err != nil {

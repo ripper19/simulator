@@ -40,6 +40,10 @@ func BenchmarkCounterTick(b *testing.B) {
 				if err != nil {
 					b.Fatal(err)
 				}
+				// Warm up so the one-time entity-set build is not measured.
+				if err := sim.Step(ctx); err != nil {
+					b.Fatal(err)
+				}
 				b.ReportAllocs()
 				b.ResetTimer()
 				for i := 0; i < b.N; i++ {

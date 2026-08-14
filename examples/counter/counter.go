@@ -12,6 +12,7 @@ package counter
 import (
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"hash/fnv"
 
 	"github.com/ripper19/simulator/pkg/model"
@@ -73,6 +74,28 @@ func (m *CounterWorld) Initialize(ctx context.Context, w *simulation.World) erro
 // Systems returns the single increment system.
 func (m *CounterWorld) Systems() []simulation.System {
 	return []simulation.System{&counterSystem{m: m}}
+}
+
+// counterConfig is the JSON-serializable model configuration.
+type counterConfig struct {
+	N            int    `json:"n"`
+	IncrementMax uint64 `json:"increment_max"`
+}
+
+// SnapshotConfig implements simulation.SnapshotModel.
+func (m *CounterWorld) SnapshotConfig() any {
+	return counterConfig{N: m.N, IncrementMax: m.IncrementMax}
+}
+
+// RestoreConfig implements simulation.SnapshotModel.
+func (m *CounterWorld) RestoreConfig(raw json.RawMessage) error {
+	var c counterConfig
+	if err := json.Unmarshal(raw, &c); err != nil {
+		return err
+	}
+	m.N = c.N
+	m.IncrementMax = c.IncrementMax
+	return nil
 }
 
 // counterSystem advances every entity's random stream and adds the resulting
