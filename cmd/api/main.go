@@ -13,7 +13,11 @@ import (
 
 	"github.com/ripper19/simulator/examples/counter"
 	"github.com/ripper19/simulator/internal/api"
+	"github.com/ripper19/simulator/internal/auth"
+	"github.com/ripper19/simulator/internal/coord"
 	"github.com/ripper19/simulator/internal/database"
+	"github.com/ripper19/simulator/internal/metrics"
+	"github.com/ripper19/simulator/internal/observability"
 	"github.com/ripper19/simulator/internal/persistence"
 	"github.com/ripper19/simulator/internal/registry"
 	"github.com/ripper19/simulator/internal/runner"
@@ -52,7 +56,27 @@ func main() {
 	})
 
 	mgr := runner.NewManager(store, reg)
+	mgr.SetMetrics(metrics.New(nil))
 	server := api.New(mgr, reg, store, logger)
+
+	if secret := os.Getenv("JWT_SECRET"); secret != "" {
+		tokens := auth.NewManager(secret, 15*time.Minute, 24*time.Hour)
+		server.SetAuth(auth.NewService(store, tokens), tokens)
+	}
+	if addr := os.Getenv("REDIS_ADDR"); addr != "" {
+		if c, err := coord.NewRedis(addr, 0); err == nil {
+			server.SetRedis(c)
+			defer c.Close()
+		}
+	}
+	if endpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"); endpoint != "" {
+		shutdown, err := observability.InitTracer(ctx, endpoint)
+		if err != nil {
+			logger.Error("tracing", "err", err)
+			os.Exit(1)
+		}
+		defer shutdown(ctx)
+	}
 
 	srv := &http.Server{
 		Addr:              addr,

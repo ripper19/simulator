@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/ripper19/simulator/pkg/model"
 )
@@ -29,6 +30,8 @@ type Simulation struct {
 	state State
 	err   error
 	steps atomic.Uint64
+
+	stepObserver func(time.Duration)
 
 	cancel context.CancelFunc
 	done   chan struct{}
@@ -89,6 +92,14 @@ func (s *Simulation) Ticks() uint64 { return s.steps.Load() }
 
 // Config returns the simulation configuration.
 func (s *Simulation) Config() Config { return s.cfg }
+
+// SetStepObserver registers a callback invoked after each step with the step
+// duration. Used for tick-duration metrics. It is not part of determinism.
+func (s *Simulation) SetStepObserver(fn func(time.Duration)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.stepObserver = fn
+}
 
 // Snapshot captures the current simulation state, including the model's own
 // configuration (when the model implements SnapshotModel). It returns an error
@@ -213,8 +224,12 @@ func (s *Simulation) Step(ctx context.Context) error {
 	}
 	s.mu.Unlock()
 
+	start := time.Now()
 	_, err := s.exec.step(ctx, s.world)
 	s.mu.Lock()
+	if obs := s.stepObserver; obs != nil {
+		obs(time.Since(start))
+	}
 	if err != nil {
 		s.state = StateFailed
 		s.err = err
@@ -314,6 +329,7 @@ func (s *Simulation) run(ctx context.Context, limit func() bool, done chan struc
 	runCtx, cancel := context.WithCancel(ctx)
 	s.mu.Lock()
 	s.cancel = cancel
+	stepObserver := s.stepObserver
 	s.mu.Unlock()
 
 	defer func() {
@@ -366,7 +382,11 @@ func (s *Simulation) run(ctx context.Context, limit func() bool, done chan struc
 			break
 		}
 
+		start := time.Now()
 		more, err := s.exec.step(runCtx, s.world)
+		if stepObserver != nil {
+			stepObserver(time.Since(start))
+		}
 		if err != nil {
 			if runCtx.Err() != nil {
 				// The run context was cancelled (Stop or external cancellation)

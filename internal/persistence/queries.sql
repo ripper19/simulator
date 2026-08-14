@@ -26,17 +26,17 @@ WHERE id = $1
 ORDER BY version;
 
 -- name: CreateSimulation :one
-INSERT INTO simulations (id, model_id, model_version, seed, mode, status, config)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
-RETURNING id, model_id, model_version, seed, mode, status, config, created_at, updated_at, completed_at;
+INSERT INTO simulations (id, model_id, model_version, seed, mode, status, config, owner_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+RETURNING id, model_id, model_version, seed, mode, status, config, created_at, updated_at, completed_at, owner_id;
 
 -- name: GetSimulation :one
-SELECT id, model_id, model_version, seed, mode, status, config, created_at, updated_at, completed_at
+SELECT id, model_id, model_version, seed, mode, status, config, created_at, updated_at, completed_at, owner_id
 FROM simulations
 WHERE id = $1;
 
 -- name: ListSimulations :many
-SELECT id, model_id, model_version, seed, mode, status, config, created_at, updated_at, completed_at
+SELECT id, model_id, model_version, seed, mode, status, config, created_at, updated_at, completed_at, owner_id
 FROM simulations
 ORDER BY created_at DESC;
 
@@ -49,7 +49,7 @@ SET status = $2,
     updated_at = now(),
     completed_at = CASE WHEN $2 IN ('completed', 'failed', 'stopped') THEN now() ELSE completed_at END
 WHERE id = $1
-RETURNING id, model_id, model_version, seed, mode, status, config, created_at, updated_at, completed_at;
+RETURNING id, model_id, model_version, seed, mode, status, config, created_at, updated_at, completed_at, owner_id;
 
 -- name: SaveSnapshot :exec
 INSERT INTO snapshots (id, simulation_id, schema_version, engine_version, data, checksum)
@@ -65,3 +65,13 @@ SELECT id, simulation_id, schema_version, engine_version, data, checksum, create
 FROM snapshots
 WHERE simulation_id = $1
 ORDER BY created_at DESC;
+
+-- name: CreateUser :one
+INSERT INTO users (id, username, password_hash, role) VALUES ($1, $2, $3, $4)
+RETURNING id, username, password_hash, role, created_at;
+
+-- name: GetUserByUsername :one
+SELECT id, username, password_hash, role, created_at FROM users WHERE username = $1;
+
+-- name: GetUser :one
+SELECT id, username, password_hash, role, created_at FROM users WHERE id = $1;

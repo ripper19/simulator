@@ -11,6 +11,7 @@ import (
 
 	"github.com/ripper19/simulator/internal/broker"
 	"github.com/ripper19/simulator/internal/coord"
+	"github.com/ripper19/simulator/internal/metrics"
 )
 
 // Queue names.
@@ -63,6 +64,7 @@ type Queue struct {
 	broker  broker.Broker
 	coord   *coord.Redis
 	backoff time.Duration
+	met     *metrics.Metrics
 }
 
 // New returns a Queue. backoff is the base delay for exponential backoff.
@@ -73,6 +75,9 @@ func New(b broker.Broker, c *coord.Redis, backoff time.Duration) *Queue {
 	return &Queue{broker: b, coord: c, backoff: backoff}
 }
 
+// SetMetrics attaches a metrics set (may be nil to disable).
+func (q *Queue) SetMetrics(met *metrics.Metrics) { q.met = met }
+
 // Enqueue publishes a job to the main queue.
 func (q *Queue) Enqueue(ctx context.Context, job Job) error {
 	if job.MaxAttempts <= 0 {
@@ -82,7 +87,13 @@ func (q *Queue) Enqueue(ctx context.Context, job Job) error {
 	if err != nil {
 		return err
 	}
-	return q.broker.Publish(ctx, QueueJobs, data)
+	if err := q.broker.Publish(ctx, QueueJobs, data); err != nil {
+		return err
+	}
+	if q.met != nil {
+		q.met.QueueDepth.Inc()
+	}
+	return nil
 }
 
 // PublishResult publishes a job result to the results queue.
@@ -122,11 +133,19 @@ func (q *Queue) Consume(ctx context.Context, handler func(ctx context.Context, j
 			if q.coord != nil {
 				_ = q.coord.Release(ctx, key)
 			}
+			q.done()
 			q.handleFailure(ctx, d, job, err)
 			return nil
 		}
+		q.done()
 		return d.Ack()
 	})
+}
+
+func (q *Queue) done() {
+	if q.met != nil {
+		q.met.QueueDepth.Dec()
+	}
 }
 
 // handleFailure acks the original message and either re-publishes with a

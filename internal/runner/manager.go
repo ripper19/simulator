@@ -14,7 +14,9 @@ import (
 	"fmt"
 	"math"
 	"sync"
+	"time"
 
+	"github.com/ripper19/simulator/internal/metrics"
 	"github.com/ripper19/simulator/internal/persistence"
 	"github.com/ripper19/simulator/internal/registry"
 	"github.com/ripper19/simulator/pkg/model"
@@ -35,6 +37,7 @@ type CreateRequest struct {
 	MaxTime      float64         `json:"max_time,omitempty"`
 	Workers      int             `json:"workers,omitempty"`
 	Config       json.RawMessage `json:"config,omitempty"`
+	OwnerID      string          `json:"owner_id,omitempty"`
 }
 
 // State is the runtime state of a simulation.
@@ -63,6 +66,7 @@ type Manager struct {
 	sims     map[string]*managed
 	store    *persistence.Store
 	registry *registry.Registry
+	met      *metrics.Metrics
 }
 
 type managed struct {
@@ -74,6 +78,18 @@ type managed struct {
 // NewManager returns a Manager backed by the store and model registry.
 func NewManager(store *persistence.Store, reg *registry.Registry) *Manager {
 	return &Manager{sims: make(map[string]*managed), store: store, registry: reg}
+}
+
+// SetMetrics attaches a metrics set (may be nil to disable).
+func (m *Manager) SetMetrics(met *metrics.Metrics) {
+	m.met = met
+}
+
+func (m *Manager) observe(sim *simulation.Simulation) {
+	if m.met == nil {
+		return
+	}
+	sim.SetStepObserver(func(d time.Duration) { m.met.TickDuration.Observe(d.Seconds()) })
 }
 
 // runConfig is the full run configuration, persisted in the simulation record's
@@ -170,6 +186,7 @@ func (m *Manager) instantiate(ctx context.Context, req CreateRequest) (*managed,
 	if err != nil {
 		return nil, fmt.Errorf("runner: init simulation: %w", err)
 	}
+	m.observe(sim)
 
 	runCfg, err := json.Marshal(runConfig{
 		ModelID:      entry.Info.ID,
@@ -196,8 +213,16 @@ func (m *Manager) instantiate(ctx context.Context, req CreateRequest) (*managed,
 			Mode:         mode.String(),
 			Status:       "created",
 			Config:       runCfg,
+			OwnerID:      ownerPtr(req.OwnerID),
 		},
 	}, nil
+}
+
+func ownerPtr(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
 }
 
 // Replay deterministically re-runs a simulation from its seed and stored
@@ -306,6 +331,10 @@ func (m *Manager) Start(ctx context.Context, id string) error {
 	if err := mg.sim.Start(context.Background()); err != nil {
 		return err
 	}
+	if m.met != nil {
+		m.met.SimulationStarted.Inc()
+		m.met.SimulationActive.Inc()
+	}
 	m.updateStatus(id, "running")
 	go m.watch(id)
 	return nil
@@ -365,6 +394,9 @@ func (m *Manager) Snapshot(ctx context.Context, id string) (*simulation.Snapshot
 	data, err := json.Marshal(snap)
 	if err != nil {
 		return nil, err
+	}
+	if m.met != nil {
+		m.met.SnapshotSize.Observe(float64(len(data)))
 	}
 	err = m.store.SaveSnapshot(ctx, persistence.SnapshotInfo{
 		ID:            newID(),
@@ -451,7 +483,8 @@ func (m *Manager) updateStatus(id, status string) {
 	}
 }
 
-// watch waits for a simulation to finish and updates its persisted status.
+// watch waits for a simulation to finish and updates its persisted status and
+// metrics.
 func (m *Manager) watch(id string) {
 	mg, err := m.lookup(id)
 	if err != nil {
@@ -459,6 +492,14 @@ func (m *Manager) watch(id string) {
 	}
 	if err := mg.sim.Wait(); err != nil {
 		_ = err // status is derived from state below
+	}
+	if m.met != nil {
+		m.met.SimulationActive.Dec()
+		if mg.sim.State() == simulation.StateFailed {
+			m.met.SimulationFailed.Inc()
+		} else {
+			m.met.SimulationCompleted.Inc()
+		}
 	}
 	m.updateStatus(id, statusOf(mg.sim.State()))
 }
