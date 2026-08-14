@@ -22,3 +22,7 @@ coverage.*
 .idea/
 .vscode/
 *.swp
+
+# Erlang/RabbitMQ crash dumps
+*.dump
+erl_crash.dump

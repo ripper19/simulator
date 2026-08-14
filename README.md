@@ -4,11 +4,12 @@ An open, general-purpose distributed simulation runtime written in Go for
 executing deterministic, extensible simulations locally or across a scalable
 worker cluster.
 
-> **Status: Phase 6** — core engine (entities, SoA components, events, clock,
+> **Status: Phase 7** — core engine (entities, SoA components, events, clock,
 > deterministic randomness, and the simulation runtime), the discrete-event
 > engine, deterministic parallel execution, versioned snapshots with restore,
-> PostgreSQL persistence (pgx + sqlc, migrations, model registry), and the REST
-> API + `sim` CLI. Later phases add distributed workers, observability, and
+> PostgreSQL persistence (pgx + sqlc, migrations, model registry), the REST API
+> + `sim` CLI, and distributed workers (RabbitMQ broker + Redis coordination,
+> jobs with retry/backoff/DLQ/idempotency). Later phases add observability and
 > auth.
 
 ## What this is
@@ -137,6 +138,29 @@ go run ./cmd/cli status <id>
 go run ./cmd/cli stop <id>
 go run ./cmd/cli snapshot <id>
 ```
+
+## Distributed workers
+
+Simulation jobs are dispatched to workers over a message broker (RabbitMQ
+behind a `Broker` interface; an in-memory broker is available for local dev and
+tests), with Redis used for transient coordination (worker heartbeats,
+idempotency claims). Workers register, heartbeat, consume jobs, execute the
+same compiled-in models in-process, and publish results. Jobs support retries
+with exponential backoff, dead-lettering, and idempotent (at-most-once)
+execution.
+
+```sh
+# worker (RabbitMQ + Redis)
+BROKER=rabbitmq AMQP_URL=amqp://guest:guest@127.0.0.1:5672/ \
+REDIS_ADDR=127.0.0.1:6379 go run ./cmd/worker
+
+# or memory broker (no services needed)
+go run ./cmd/worker
+```
+
+See `internal/broker`, `internal/queue`, `internal/workers`, and
+`internal/coord`. The same model runs unchanged in-process (P6 API), as a local
+worker, or across a worker cluster.
 
 ## Verification
 
