@@ -1,6 +1,8 @@
 // Package economy is an example model where a price series emerges from
 // aggregate supply and demand. A configurable intervention (supply shock or
-// price cap) visibly changes the price trajectory, all deterministically.
+// price cap) visibly changes the price trajectory, all deterministically. It is
+// an illustrative toy: prices are not stabilized, so sustained shocks produce
+// unbounded price movement.
 package economy
 
 import (
