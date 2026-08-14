@@ -10,14 +10,13 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/ripper19/simulator/examples/counter"
+	"github.com/ripper19/simulator/internal/app"
 	"github.com/ripper19/simulator/internal/broker"
 	"github.com/ripper19/simulator/internal/coord"
 	"github.com/ripper19/simulator/internal/metrics"
 	"github.com/ripper19/simulator/internal/queue"
 	"github.com/ripper19/simulator/internal/registry"
 	"github.com/ripper19/simulator/internal/workers"
-	"github.com/ripper19/simulator/pkg/simulation"
 )
 
 func main() {
@@ -53,9 +52,7 @@ func main() {
 	}
 
 	reg := registry.New()
-	reg.Register((&counter.CounterWorld{}).Metadata(), func() simulation.Model {
-		return &counter.CounterWorld{}
-	})
+	app.RegisterModels(reg)
 
 	q := queue.New(br, c, 0)
 	met := metrics.New(nil)

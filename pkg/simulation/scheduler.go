@@ -124,7 +124,11 @@ func (s *scheduler) runSystem(ctx context.Context, w *World, idx int) error {
 	if len(entities) == 0 {
 		return nil
 	}
-	shards := partition(entities, s.workers)
+	workers := s.workers
+	if serial, ok := sys.(SerialSystem); ok && serial.Serial() {
+		workers = 1
+	}
+	shards := partition(entities, workers)
 	if len(shards) == 1 {
 		return sys.Run(ctx, w, shards[0])
 	}

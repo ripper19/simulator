@@ -1,9 +1,11 @@
 // Package dsystem is an example discrete-event model of a small distributed
 // system: requests are routed to healthy servers, servers fail and recover.
+// Availability depends on the interaction of request load and failure rate.
 package dsystem
 
 import (
 	"context"
+	"encoding/json"
 
 	"github.com/ripper19/simulator/pkg/model"
 	"github.com/ripper19/simulator/pkg/rng"
@@ -16,14 +18,41 @@ type SrvState struct {
 	Load    int
 }
 
+// Config is the JSON-configurable distributed-system scenario.
+type Config struct {
+	Servers         int     `json:"servers"`
+	ArrivalInterval float64 `json:"arrival_interval"`
+	ProcessingTime  float64 `json:"processing_time"`
+	FailureInterval float64 `json:"failure_interval"`
+	RecoveryTime    float64 `json:"recovery_time"`
+	MaxTime         float64 `json:"max_time"`
+}
+
+func (c Config) withDefaults() Config {
+	if c.Servers <= 0 {
+		c.Servers = 4
+	}
+	if c.ArrivalInterval <= 0 {
+		c.ArrivalInterval = 1
+	}
+	if c.ProcessingTime <= 0 {
+		c.ProcessingTime = 2
+	}
+	if c.FailureInterval <= 0 {
+		c.FailureInterval = 10
+	}
+	if c.RecoveryTime <= 0 {
+		c.RecoveryTime = 5
+	}
+	if c.MaxTime <= 0 {
+		c.MaxTime = 100
+	}
+	return c
+}
+
 // DistributedSystem routes requests across servers that fail and recover.
 type DistributedSystem struct {
-	Servers         int
-	ArrivalInterval float64
-	ProcessingTime  float64
-	FailureInterval float64
-	RecoveryTime    float64
-	MaxTime         float64
+	cfg Config
 
 	srvID  simulation.ComponentID
 	srvCol *simulation.Column[SrvState]
@@ -31,6 +60,7 @@ type DistributedSystem struct {
 	rng       rng.RNG
 	rr        int
 	processed int
+	dropped   int
 }
 
 // Metadata describes the distributed-system model.
@@ -44,15 +74,30 @@ func (m *DistributedSystem) Metadata() model.Metadata {
 	}
 }
 
+// Configure applies the scenario configuration.
+func (m *DistributedSystem) Configure(raw json.RawMessage) error {
+	var c Config
+	if len(raw) == 0 {
+		c = Config{}
+	} else if err := json.Unmarshal(raw, &c); err != nil {
+		return err
+	}
+	m.cfg = c.withDefaults()
+	return nil
+}
+
 // Initialize creates servers and seeds the first request and failure.
 func (m *DistributedSystem) Initialize(ctx context.Context, w *simulation.World) error {
+	if m.cfg.Servers == 0 {
+		m.cfg = m.cfg.withDefaults()
+	}
 	m.srvID, m.srvCol = simulation.RegisterComponent[SrvState](w.Components, "ds.state")
 	m.rng = w.Random.StreamU64(1)
-	for i := 0; i < m.Servers; i++ {
+	for i := 0; i < m.cfg.Servers; i++ {
 		m.srvCol.Set(w.Entities.Create(), SrvState{Healthy: true})
 	}
 	w.ScheduleNow("request", nil)
-	w.ScheduleIn(m.FailureInterval, "fail", nil)
+	w.ScheduleIn(m.cfg.FailureInterval, "fail", nil)
 	return nil
 }
 
@@ -65,11 +110,13 @@ func (m *DistributedSystem) HandleEvent(ctx context.Context, w *simulation.World
 			st.Load++
 			m.srvCol.Set(srv, st)
 			w.Events.Push(simulation.Event{
-				Type: "done", Time: w.Clock.Time() + m.ProcessingTime, Source: srv,
+				Type: "done", Time: w.Clock.Time() + m.cfg.ProcessingTime, Source: srv,
 			})
+		} else {
+			m.dropped++
 		}
-		if w.Clock.Time() < m.MaxTime {
-			w.ScheduleIn(m.ArrivalInterval, "request", nil)
+		if w.Clock.Time() < m.cfg.MaxTime {
+			w.ScheduleIn(m.cfg.ArrivalInterval, "request", nil)
 		}
 	case "done":
 		if st, ok := m.srvCol.Get(e.Source); ok {
@@ -83,11 +130,11 @@ func (m *DistributedSystem) HandleEvent(ctx context.Context, w *simulation.World
 			st.Healthy = false
 			m.srvCol.Set(srv, st)
 			w.Events.Push(simulation.Event{
-				Type: "recover", Time: w.Clock.Time() + m.RecoveryTime, Source: srv,
+				Type: "recover", Time: w.Clock.Time() + m.cfg.RecoveryTime, Source: srv,
 			})
 		}
-		if w.Clock.Time() < m.MaxTime {
-			w.ScheduleIn(m.FailureInterval, "fail", nil)
+		if w.Clock.Time() < m.cfg.MaxTime {
+			w.ScheduleIn(m.cfg.FailureInterval, "fail", nil)
 		}
 	case "recover":
 		if st, ok := m.srvCol.Get(e.Source); ok {
@@ -111,5 +158,16 @@ func (m *DistributedSystem) pick(w *simulation.World) (simulation.EntityID, bool
 	return 0, false
 }
 
-// Processed returns the number of completed requests.
-func (m *DistributedSystem) Processed() int { return m.processed }
+// Metrics reports the measured outcomes.
+func (m *DistributedSystem) Metrics() map[string]float64 {
+	total := m.processed + m.dropped
+	availability := 1.0
+	if total > 0 {
+		availability = float64(m.processed) / float64(total)
+	}
+	return map[string]float64{
+		"processed":    float64(m.processed),
+		"dropped":      float64(m.dropped),
+		"availability": availability,
+	}
+}

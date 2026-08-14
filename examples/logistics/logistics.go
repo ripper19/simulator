@@ -4,6 +4,7 @@ package logistics
 
 import (
 	"context"
+	"encoding/json"
 
 	"github.com/ripper19/simulator/pkg/model"
 	"github.com/ripper19/simulator/pkg/rng"
@@ -19,11 +20,29 @@ type Capacity struct{ Max, Load int }
 // Order is a pending delivery, in remaining units.
 type Order struct{ Remaining int }
 
+// Config is the JSON-configurable logistics scenario.
+type Config struct {
+	Warehouses int `json:"warehouses"`
+	Vehicles   int `json:"vehicles"`
+	Orders     int `json:"orders"`
+}
+
+func (c Config) withDefaults() Config {
+	if c.Warehouses <= 0 {
+		c.Warehouses = 2
+	}
+	if c.Vehicles <= 0 {
+		c.Vehicles = 5
+	}
+	if c.Orders <= 0 {
+		c.Orders = 20
+	}
+	return c
+}
+
 // Logistics dispatches orders to vehicles each tick.
 type Logistics struct {
-	Warehouses int
-	Vehicles   int
-	Orders     int
+	cfg Config
 
 	invID  simulation.ComponentID
 	invCol *simulation.Column[Inventory]
@@ -48,21 +67,36 @@ func (m *Logistics) Metadata() model.Metadata {
 	}
 }
 
+// Configure applies the scenario configuration.
+func (m *Logistics) Configure(raw json.RawMessage) error {
+	var c Config
+	if len(raw) == 0 {
+		c = Config{}
+	} else if err := json.Unmarshal(raw, &c); err != nil {
+		return err
+	}
+	m.cfg = c.withDefaults()
+	return nil
+}
+
 // Initialize creates warehouses, vehicles, and orders.
 func (m *Logistics) Initialize(ctx context.Context, w *simulation.World) error {
+	if m.cfg.Vehicles == 0 {
+		m.cfg = m.cfg.withDefaults()
+	}
 	m.invID, m.invCol = simulation.RegisterComponent[Inventory](w.Components, "log.inventory")
 	m.capID, m.capCol = simulation.RegisterComponent[Capacity](w.Components, "log.capacity")
 	m.ordID, m.ordCol = simulation.RegisterComponent[Order](w.Components, "log.order")
 	m.rng = w.Random.StreamU64(1)
 	m.assignments = make(map[simulation.EntityID]simulation.EntityID)
 
-	for i := 0; i < m.Warehouses; i++ {
+	for i := 0; i < m.cfg.Warehouses; i++ {
 		m.invCol.Set(w.Entities.Create(), Inventory{Units: 1000})
 	}
-	for i := 0; i < m.Vehicles; i++ {
+	for i := 0; i < m.cfg.Vehicles; i++ {
 		m.capCol.Set(w.Entities.Create(), Capacity{Max: 3})
 	}
-	for i := 0; i < m.Orders; i++ {
+	for i := 0; i < m.cfg.Orders; i++ {
 		m.ordCol.Set(w.Entities.Create(), Order{Remaining: 1 + int(m.rng.Uint64n(5))})
 	}
 	return nil
@@ -136,3 +170,12 @@ func (m *Logistics) assignmentsReverse(o simulation.EntityID) (simulation.Entity
 
 // Delivered returns the number of completed orders.
 func (m *Logistics) Delivered() int { return m.delivered }
+
+// Metrics reports the measured outcomes.
+func (m *Logistics) Metrics() map[string]float64 {
+	return map[string]float64{
+		"delivered": float64(m.delivered),
+		"orders":    float64(m.cfg.Orders),
+		"vehicles":  float64(m.cfg.Vehicles),
+	}
+}

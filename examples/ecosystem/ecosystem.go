@@ -6,6 +6,7 @@ package ecosystem
 
 import (
 	"context"
+	"encoding/json"
 
 	"github.com/ripper19/simulator/pkg/model"
 	"github.com/ripper19/simulator/pkg/simulation"
@@ -14,12 +15,30 @@ import (
 // Energy is the shared energy component for animals and plants.
 type Energy struct{ E int }
 
+// Config is the JSON-configurable ecosystem scenario.
+type Config struct {
+	Plants     int `json:"plants"`
+	Animals    int `json:"animals"`
+	MaxAnimals int `json:"max_animals"` // carrying capacity
+}
+
+func (c Config) withDefaults() Config {
+	if c.Plants <= 0 {
+		c.Plants = 40
+	}
+	if c.Animals <= 0 {
+		c.Animals = 6
+	}
+	if c.MaxAnimals <= 0 {
+		c.MaxAnimals = 15
+	}
+	return c
+}
+
 // Ecosystem is a simple ecosystem: plants grow, animals graze, reproduce when
 // well-fed (subject to a carrying capacity), and die at zero energy.
 type Ecosystem struct {
-	Plants     int
-	Animals    int
-	MaxAnimals int // carrying capacity for density-dependent reproduction
+	cfg Config
 
 	energyID  simulation.ComponentID
 	energyCol *simulation.Column[Energy]
@@ -27,6 +46,9 @@ type Ecosystem struct {
 	plantTag  simulation.Tag
 
 	plantCursor int
+	animalCount int
+	plantCount  int
+	totalEnergy int
 }
 
 // Metadata describes the ecosystem model.
@@ -40,19 +62,34 @@ func (m *Ecosystem) Metadata() model.Metadata {
 	}
 }
 
+// Configure applies the scenario configuration.
+func (m *Ecosystem) Configure(raw json.RawMessage) error {
+	var c Config
+	if len(raw) == 0 {
+		c = Config{}
+	} else if err := json.Unmarshal(raw, &c); err != nil {
+		return err
+	}
+	m.cfg = c.withDefaults()
+	return nil
+}
+
 // Initialize seeds plants and animals.
 func (m *Ecosystem) Initialize(ctx context.Context, w *simulation.World) error {
+	if m.cfg.Plants == 0 {
+		m.cfg = m.cfg.withDefaults()
+	}
 	m.energyID, m.energyCol = simulation.RegisterComponent[Energy](w.Components, "eco.energy")
 	m.animalTag = w.Tags.Register("animal")
 	m.plantTag = w.Tags.Register("plant")
 
 	stream := w.Random.StreamU64(1)
-	for i := 0; i < m.Plants; i++ {
+	for i := 0; i < m.cfg.Plants; i++ {
 		e := w.Entities.Create()
 		w.TagStore.Add(e, m.plantTag)
 		m.energyCol.Set(e, Energy{E: 3 + int(stream.Uint64n(3))})
 	}
-	for i := 0; i < m.Animals; i++ {
+	for i := 0; i < m.cfg.Animals; i++ {
 		e := w.Entities.Create()
 		w.TagStore.Add(e, m.animalTag)
 		m.energyCol.Set(e, Energy{E: 4 + int(stream.Uint64n(4))})
@@ -90,7 +127,7 @@ func (m *Ecosystem) Step(ctx context.Context, w *simulation.World) error {
 	}
 
 	// Reproduce well-fed animals (up to carrying capacity) and collect the dead.
-	canReproduce := len(animals) < m.MaxAnimals
+	canReproduce := len(animals) < m.cfg.MaxAnimals
 	var dead []simulation.EntityID
 	for _, a := range animals {
 		v, _ := m.energyCol.Get(a)
@@ -114,7 +151,21 @@ func (m *Ecosystem) Step(ctx context.Context, w *simulation.World) error {
 		w.TagStore.RemoveEntity(e)
 		m.energyCol.Remove(e)
 	}
+
+	m.animalCount = len(m.animalIDs(w))
+	m.plantCount = len(m.plantIDs(w))
+	m.totalEnergy = 0
+	m.energyCol.Each(func(_ simulation.EntityID, v Energy) { m.totalEnergy += v.E })
 	return nil
+}
+
+// Metrics reports the measured populations and total energy.
+func (m *Ecosystem) Metrics() map[string]float64 {
+	return map[string]float64{
+		"animals":      float64(m.animalCount),
+		"plants":       float64(m.plantCount),
+		"total_energy": float64(m.totalEnergy),
+	}
 }
 
 func (m *Ecosystem) plantIDs(w *simulation.World) []simulation.EntityID {

@@ -34,3 +34,13 @@ type SystemModel interface {
 	// order.
 	Systems() []System
 }
+
+// SerialSystem is implemented by systems that must run as a single shard (for
+// example, ordered car-following where each entity's movement depends on the
+// entity ahead), rather than being partitioned across workers. The scheduler
+// runs such a system serially while still ordering it by dependency.
+type SerialSystem interface {
+	System
+	// Serial reports that the system cannot be sharded.
+	Serial() bool
+}
