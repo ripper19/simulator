@@ -17,9 +17,11 @@ worker:
     pullPolicy: IfNotPresent
 
 config:
-  databaseUrl: "postgres://simulator:simulator_dev_pw@postgres:5432/simulator?sslmode=disable"
+  # Replace with managed-service credentials via --set or a Secret; do not
+  # commit real credentials.
+  databaseUrl: "postgres://simulator:CHANGE_ME@postgres:5432/simulator?sslmode=disable"
   redisAddr: "redis:6379"
-  amqpUrl: "amqp://simulator:simulator_dev_pw@rabbitmq:5672/"
+  amqpUrl: "amqp://simulator:CHANGE_ME@rabbitmq:5672/"
   httpAddr: ":8080"
 
 jwt:

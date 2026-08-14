@@ -110,7 +110,7 @@ supports multiple versions so a simulation pins the exact model version it ran
 with.
 
 ```sh
-export DATABASE_URL=postgres://simulator:simulator_dev_pw@127.0.0.1:5432/simulator?sslmode=disable
+export DATABASE_URL=postgres://simulator:<password>@127.0.0.1:5432/simulator?sslmode=disable
 go run ./cmd/migrate           # apply migrations
 go run ./cmd/migrate -down 1   # roll back one migration
 ```
@@ -129,7 +129,7 @@ the full simulation lifecycle, plus a `sim` CLI (`cmd/cli`) that drives it over
 HTTP. See `docs/api/openapi.yaml` for the endpoint reference.
 
 ```sh
-export DATABASE_URL=postgres://simulator:simulator_dev_pw@127.0.0.1:5432/simulator?sslmode=disable
+export DATABASE_URL=postgres://simulator:<password>@127.0.0.1:5432/simulator?sslmode=disable
 go run ./cmd/api                       # start the API on :8080
 go run ./cmd/cli models                # list models
 go run ./cmd/cli create --model counter --seed 42 --n 1000

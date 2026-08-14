@@ -26,7 +26,7 @@ jobs:
         image: postgres:17
         env:
           POSTGRES_USER: simulator
-          POSTGRES_PASSWORD: simulator_dev_pw
+          POSTGRES_PASSWORD: postgres
           POSTGRES_DB: simulator
         ports: ["5432:5432"]
         options: >-
@@ -43,7 +43,7 @@ jobs:
           --health-timeout 3s
           --health-retries 10
     env:
-      DATABASE_URL: postgres://simulator:simulator_dev_pw@127.0.0.1:5432/simulator?sslmode=disable
+      DATABASE_URL: postgres://simulator:postgres@127.0.0.1:5432/simulator?sslmode=disable
       REDIS_ADDR: 127.0.0.1:6379
     steps:
       - uses: actions/checkout@v4
