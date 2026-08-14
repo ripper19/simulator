@@ -202,3 +202,25 @@ go test -race ./...
 go vet ./...
 gofmt -l .
 ```
+
+## Example models
+
+`examples/` proves the engine is domain-agnostic — none of these concepts exist
+in the core runtime:
+
+| Example | Entities | Mode |
+|---------|----------|------|
+| `counter` | counters accumulating random values | tick |
+| `traffic` | vehicles, intersections (traffic lights) | tick (systems) |
+| `ecosystem` | plants, animals (grow/eat/reproduce/die) | tick |
+| `logistics` | warehouses, vehicles, orders | tick |
+| `queue` | customers, servers | event |
+| `distributed-system` | servers, requests (failure/recovery) | event |
+
+## Documentation
+
+- Architecture: `docs/architecture/` (overview, runtime, distributed, persistence,
+  security/observability, performance/scaling, risk review) with Mermaid diagrams.
+- Decisions: `docs/adr/` (ADR-001 … ADR-013).
+- API reference: `docs/api/openapi.yaml`.
+- Load-test results: `tests/load/README.md`.
