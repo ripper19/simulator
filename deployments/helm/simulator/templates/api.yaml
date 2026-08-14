@@ -1,0 +1,58 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "simulator.fullname" . }}-api
+  labels:
+    {{- include "simulator.labels" . | nindent 4 }}
+    component: api
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "simulator.labels" . | nindent 6 }}
+      component: api
+  template:
+    metadata:
+      labels:
+        {{- include "simulator.labels" . | nindent 8 }}
+        component: api
+    spec:
+      containers:
+        - name: api
+          image: "{{ .Values.api.image.repository }}:{{ .Values.api.image.tag }}"
+          imagePullPolicy: {{ .Values.api.image.pullPolicy }}
+          env:
+            - name: DATABASE_URL
+              value: {{ .Values.config.databaseUrl | quote }}
+            - name: REDIS_ADDR
+              value: {{ .Values.config.redisAddr | quote }}
+            - name: AMQP_URL
+              value: {{ .Values.config.amqpUrl | quote }}
+            - name: HTTP_ADDR
+              value: {{ .Values.config.httpAddr | quote }}
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "simulator.fullname" . }}-secret
+                  key: jwt-secret
+          ports:
+            - containerPort: 8080
+              name: http
+          resources:
+            {{- toYaml .Values.resources.api | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "simulator.fullname" . }}-api
+  labels:
+    {{- include "simulator.labels" . | nindent 4 }}
+    component: api
+spec:
+  type: {{ .Values.api.service.type }}
+  selector:
+    {{- include "simulator.labels" . | nindent 4 }}
+    component: api
+  ports:
+    - port: {{ .Values.api.service.port }}
+      targetPort: http

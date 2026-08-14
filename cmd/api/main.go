@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -76,6 +77,9 @@ func main() {
 			server.SetRedis(c)
 			defer c.Close()
 		}
+	}
+	if v, err := strconv.ParseInt(os.Getenv("RATE_LIMIT"), 10, 64); err == nil && v > 0 {
+		server.SetRateLimit(v)
 	}
 	if endpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"); endpoint != "" {
 		shutdown, err := observability.InitTracer(ctx, endpoint)

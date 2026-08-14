@@ -149,7 +149,7 @@ func (m *Manager) instantiate(ctx context.Context, req CreateRequest) (*managed,
 	}
 
 	mdl := entry.Factory()
-	if req.Config != nil && len(req.Config) > 0 {
+	if len(req.Config) > 0 {
 		if cm, ok := mdl.(simulation.ConfigurableModel); ok {
 			if err := cm.Configure(req.Config); err != nil {
 				return nil, fmt.Errorf("runner: configure model: %w", err)

@@ -2,9 +2,11 @@
 package api
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -30,6 +32,8 @@ type Server struct {
 	auth   *auth.Service
 	tokens *auth.Manager
 	redis  *coord.Redis
+
+	rateLimitPerMin int64
 }
 
 // New returns a Server.
@@ -37,7 +41,7 @@ func New(manager *runner.Manager, reg *registry.Registry, store *persistence.Sto
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Server{manager: manager, registry: reg, store: store, logger: logger}
+	return &Server{manager: manager, registry: reg, store: store, logger: logger, rateLimitPerMin: 60}
 }
 
 // SetAuth enables authentication with the given service and JWT manager.
@@ -49,11 +53,13 @@ func (s *Server) SetAuth(svc *auth.Service, tokens *auth.Manager) {
 // SetRedis enables Redis-backed rate limiting.
 func (s *Server) SetRedis(c *coord.Redis) { s.redis = c }
 
+// SetRateLimit configures the per-IP per-minute request limit (default 60).
+func (s *Server) SetRateLimit(n int64) { s.rateLimitPerMin = n }
+
 // Router builds the HTTP handler with all routes and middleware.
 func (s *Server) Router() http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
-	r.Use(middleware.RealIP)
 	r.Use(middleware.Recoverer)
 	r.Use(s.timeout())
 	r.Use(observability.Middleware)
@@ -133,21 +139,60 @@ func (s *Server) rateLimit(next http.Handler) http.Handler {
 	if s.redis == nil {
 		return next
 	}
-	return ratelimit.Middleware(s.redis, 60, time.Minute, nil)(next)
+	return ratelimit.Middleware(s.redis, s.rateLimitPerMin, time.Minute, nil)(next)
 }
 
-// timeout applies a 30s request timeout, exempting long-lived SSE streams.
+// timeout applies a 30s request timeout returning 503, exempting long-lived
+// SSE streams. A guard suppresses the "superfluous WriteHeader" noise when a
+// handler races with the timeout.
 func (s *Server) timeout() func(http.Handler) http.Handler {
-	timeout := middleware.Timeout(30 * time.Second)
+	const dur = 30 * time.Second
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if strings.HasSuffix(r.URL.Path, "/stream") {
 				next.ServeHTTP(w, r)
 				return
 			}
-			timeout(next).ServeHTTP(w, r)
+			var timedOut, wrote atomic.Bool
+			tw := &timeoutWriter{ResponseWriter: w, timedOut: &timedOut, wrote: &wrote}
+			ctx, cancel := context.WithTimeout(r.Context(), dur)
+			defer cancel()
+			stop := context.AfterFunc(ctx, func() {
+				if wrote.Load() {
+					return
+				}
+				timedOut.Store(true)
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusServiceUnavailable)
+				_, _ = w.Write([]byte(`{"error":{"code":"timeout","message":"request timed out"}}`))
+			})
+			defer stop()
+			next.ServeHTTP(tw, r.WithContext(ctx))
 		})
 	}
+}
+
+// timeoutWriter suppresses handler writes after a timeout has been reported.
+type timeoutWriter struct {
+	http.ResponseWriter
+	timedOut *atomic.Bool
+	wrote    *atomic.Bool
+}
+
+func (t *timeoutWriter) WriteHeader(status int) {
+	if t.timedOut.Load() {
+		return
+	}
+	t.wrote.Store(true)
+	t.ResponseWriter.WriteHeader(status)
+}
+
+func (t *timeoutWriter) Write(b []byte) (int, error) {
+	if t.timedOut.Load() {
+		return 0, http.ErrHandlerTimeout
+	}
+	t.wrote.Store(true)
+	return t.ResponseWriter.Write(b)
 }
 
 func (s *Server) requestLogger() func(http.Handler) http.Handler {

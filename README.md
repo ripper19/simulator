@@ -4,14 +4,13 @@ An open, general-purpose distributed simulation runtime written in Go for
 executing deterministic, extensible simulations locally or across a scalable
 worker cluster.
 
-> **Status: Phase 8** — core engine (entities, SoA components, events, clock,
+> **Status: Phase 9** — core engine (entities, SoA components, events, clock,
 > deterministic randomness, and the simulation runtime), the discrete-event
 > engine, deterministic parallel execution, versioned snapshots with restore,
-> PostgreSQL persistence (pgx + sqlc, migrations, model registry), the REST API
-> + `sim` CLI, distributed workers (RabbitMQ + Redis), and observability
-> (Prometheus metrics, OpenTelemetry tracing, structured logging) plus JWT auth
-> and rate limiting. Later phases add CI/CD, Kubernetes, load tests, and the
-> remaining example models.
+> PostgreSQL persistence, the REST API + CLI, distributed workers, observability
+> + auth + rate limiting, and CI/CD (GitHub Actions), Docker images, Kubernetes
+> (Helm), and k6 load tests. Final phases add the remaining example models,
+> benchmarks, and architecture documentation.
 
 ## What this is
 
@@ -111,7 +110,7 @@ supports multiple versions so a simulation pins the exact model version it ran
 with.
 
 ```sh
-export DATABASE_URL=postgres://simulator:simulator_dev_pw@127.0.0.1:5432/simulator?sslmode=disable
+export DATABASE_URL=postgres://simulator:<password>@127.0.0.1:5432/simulator?sslmode=disable
 go run ./cmd/migrate           # apply migrations
 go run ./cmd/migrate -down 1   # roll back one migration
 ```
@@ -130,7 +129,7 @@ the full simulation lifecycle, plus a `sim` CLI (`cmd/cli`) that drives it over
 HTTP. See `docs/api/openapi.yaml` for the endpoint reference.
 
 ```sh
-export DATABASE_URL=postgres://simulator:simulator_dev_pw@127.0.0.1:5432/simulator?sslmode=disable
+export DATABASE_URL=postgres://simulator:<password>@127.0.0.1:5432/simulator?sslmode=disable
 go run ./cmd/api                       # start the API on :8080
 go run ./cmd/cli models                # list models
 go run ./cmd/cli create --model counter --seed 42 --n 1000
@@ -183,6 +182,17 @@ DATABASE_URL=... go run ./cmd/api
 # Observability stack (Prometheus + Grafana, Docker only)
 cd deployments/docker && docker compose up
 ```
+
+## CI/CD, containers, and Kubernetes
+
+- **CI**: `.github/workflows/ci.yml` — gofmt, vet, unit + integration tests
+  (Postgres + Redis service containers), race detector, build, Docker build.
+- **Containers**: multi-stage `deployments/docker/Dockerfile` (`--build-arg APP=api|worker|cli|migrate`)
+  and a full `docker-compose.yml` (API, worker, PostgreSQL, Redis, RabbitMQ,
+  Prometheus, Grafana).
+- **Kubernetes**: Helm chart at `deployments/helm/simulator` (API + horizontally
+  scalable workers; external managed Postgres/Redis/RabbitMQ).
+- **Load tests**: k6 scripts in `tests/load/`.
 
 ## Verification
 

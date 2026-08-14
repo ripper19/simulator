@@ -1,0 +1,44 @@
+replicaCount: 1
+
+api:
+  image:
+    repository: simulator-api
+    tag: latest
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    port: 8080
+
+worker:
+  replicaCount: 2
+  image:
+    repository: simulator-worker
+    tag: latest
+    pullPolicy: IfNotPresent
+
+config:
+  # Replace with managed-service credentials via --set or a Secret; do not
+  # commit real credentials.
+  databaseUrl: "postgres://simulator:CHANGE_ME@postgres:5432/simulator?sslmode=disable"
+  redisAddr: "redis:6379"
+  amqpUrl: "amqp://simulator:CHANGE_ME@rabbitmq:5672/"
+  httpAddr: ":8080"
+
+jwt:
+  secret: "change-me"
+
+resources:
+  api:
+    limits:
+      cpu: "1"
+      memory: 512Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+  worker:
+    limits:
+      cpu: "1"
+      memory: 512Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi

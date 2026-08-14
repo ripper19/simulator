@@ -1,0 +1,32 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "simulator.fullname" . }}-worker
+  labels:
+    {{- include "simulator.labels" . | nindent 4 }}
+    component: worker
+spec:
+  replicas: {{ .Values.worker.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "simulator.labels" . | nindent 6 }}
+      component: worker
+  template:
+    metadata:
+      labels:
+        {{- include "simulator.labels" . | nindent 8 }}
+        component: worker
+    spec:
+      containers:
+        - name: worker
+          image: "{{ .Values.worker.image.repository }}:{{ .Values.worker.image.tag }}"
+          imagePullPolicy: {{ .Values.worker.image.pullPolicy }}
+          env:
+            - name: BROKER
+              value: "rabbitmq"
+            - name: AMQP_URL
+              value: {{ .Values.config.amqpUrl | quote }}
+            - name: REDIS_ADDR
+              value: {{ .Values.config.redisAddr | quote }}
+          resources:
+            {{- toYaml .Values.resources.worker | nindent 12 }}
