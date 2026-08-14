@@ -43,6 +43,24 @@ func (t *TagRegistry) Name(tag Tag) string {
 	return t.names[tag]
 }
 
+// snapshot returns the tag names in ID order.
+func (t *TagRegistry) snapshot() []string {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return append([]string(nil), t.names...)
+}
+
+// restore rebuilds the tag registry from the given names (in ID order).
+func (t *TagRegistry) restore(names []string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.names = append([]string(nil), names...)
+	t.byName = make(map[string]Tag, len(names))
+	for i, n := range names {
+		t.byName[n] = Tag(i)
+	}
+}
+
 // TagStore stores the set of tags attached to each entity. Tags are optional
 // and lazily allocated per entity; they use a growable bitset so that a single
 // uint64 covers up to 64 tags with O(1) membership tests and small memory.
@@ -103,4 +121,25 @@ func (s *TagStore) RemoveEntity(e EntityID) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.sets, e)
+}
+
+// snapshot returns the per-entity tag bitsets.
+func (s *TagStore) snapshot() map[EntityID][]uint64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make(map[EntityID][]uint64, len(s.sets))
+	for e, words := range s.sets {
+		out[e] = append([]uint64(nil), words...)
+	}
+	return out
+}
+
+// restore rebuilds the tag store from the given per-entity bitsets.
+func (s *TagStore) restore(sets map[EntityID][]uint64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.sets = make(map[EntityID][]uint64, len(sets))
+	for e, words := range sets {
+		s.sets[e] = append([]uint64(nil), words...)
+	}
 }

@@ -1,0 +1,229 @@
+openapi: 3.0.3
+info:
+  title: Simulator API
+  version: 0.1.0
+  description: |
+    REST API for the general-purpose distributed simulation platform.
+    Endpoints cover the model registry, simulation lifecycle, snapshots, and
+    live state/metrics.
+paths:
+  /healthz:
+    get:
+      summary: Health check
+      responses:
+        '200':
+          description: OK
+  /api/v1/models:
+    get:
+      summary: List registered models
+      responses:
+        '200':
+          description: Model list
+    post:
+      summary: Sync the model registry to durable storage
+      responses:
+        '200':
+          description: Model list after sync
+  /api/v1/models/{id}:
+    get:
+      summary: Get a model by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Model metadata
+        '404':
+          description: Not found
+  /api/v1/simulations:
+    get:
+      summary: List simulations
+      responses:
+        '200':
+          description: Simulation list
+    post:
+      summary: Create a simulation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [model_id, seed]
+              properties:
+                id: { type: string }
+                model_id: { type: string }
+                model_version: { type: string }
+                seed: { type: integer }
+                mode: { type: string, enum: [tick, event] }
+                max_ticks: { type: integer }
+                max_time: { type: number }
+                workers: { type: integer }
+                config: { type: object }
+      responses:
+        '201':
+          description: Created simulation record
+        '400':
+          description: Invalid request
+  /api/v1/simulations/{id}:
+    get:
+      summary: Get a simulation
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Simulation record
+        '404':
+          description: Not found
+    delete:
+      summary: Delete a simulation
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '204':
+          description: Deleted
+  /api/v1/simulations/{id}/start:
+    post:
+      summary: Start a simulation
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '202':
+          description: Started
+  /api/v1/simulations/{id}/pause:
+    post:
+      summary: Pause a simulation
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Paused
+  /api/v1/simulations/{id}/resume:
+    post:
+      summary: Resume a simulation
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Resumed
+  /api/v1/simulations/{id}/stop:
+    post:
+      summary: Stop a simulation
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Stopped
+  /api/v1/simulations/{id}/step:
+    post:
+      summary: Advance a simulation one step
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Stepped
+  /api/v1/simulations/{id}/snapshot:
+    post:
+      summary: Capture a snapshot
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Snapshot
+  /api/v1/simulations/{id}/restore:
+    post:
+      summary: Restore a snapshot
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        '200':
+          description: Restored
+  /api/v1/simulations/{id}/replay:
+    post:
+      summary: Replay a simulation from its seed
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Replayed
+  /api/v1/simulations/{id}/state:
+    get:
+      summary: Get simulation runtime state
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: State
+  /api/v1/simulations/{id}/events:
+    get:
+      summary: List queued events
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Events
+  /api/v1/simulations/{id}/metrics:
+    get:
+      summary: Get simulation metrics
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Metrics
+  /api/v1/simulations/{id}/stream:
+    get:
+      summary: Stream live progress (Server-Sent Events)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Event stream

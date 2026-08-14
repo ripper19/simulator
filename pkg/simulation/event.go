@@ -3,6 +3,9 @@ package simulation
 import (
 	"container/heap"
 	"encoding/json"
+	"fmt"
+	"reflect"
+	"sort"
 	"sync"
 )
 
@@ -91,8 +94,9 @@ func (q *EventQueue) pushRaw(e Event) {
 }
 
 // eventSnapshot is the serializable form of an Event. The payload is stored as
-// opaque JSON; models with typed payloads must re-decode it on restore (payload
-// codec registration is future work).
+// JSON. Payload types registered via World.RegisterPayloadType are wrapped in an
+// envelope that preserves their Go type on restore; unregistered types restore
+// as opaque json.RawMessage.
 type eventSnapshot struct {
 	ID       EventID         `json:"id"`
 	Type     string          `json:"type"`
@@ -112,7 +116,52 @@ type eventQueueState struct {
 	Seq    uint64          `json:"seq"`
 }
 
-func (q *EventQueue) snapshot() (eventQueueState, error) {
+// payloadEnvelope wraps a registered payload type with its Go type name so it
+// can be reconstructed on restore.
+type payloadEnvelope struct {
+	Type string          `json:"__t"`
+	Data json.RawMessage `json:"data"`
+}
+
+// marshalPayload serializes a payload. Registered types are wrapped in an
+// envelope; everything else is serialized as plain JSON.
+func marshalPayload(p any, types map[string]reflect.Type) (json.RawMessage, error) {
+	if p == nil {
+		return nil, nil
+	}
+	name := reflect.TypeOf(p).String()
+	if _, ok := types[name]; ok {
+		data, err := json.Marshal(p)
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(payloadEnvelope{Type: name, Data: data})
+	}
+	return json.Marshal(p)
+}
+
+// unmarshalPayload reconstructs a payload. Enveloped payloads are decoded back
+// into their registered Go type; others become opaque json.RawMessage.
+func unmarshalPayload(raw json.RawMessage, types map[string]reflect.Type) (any, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	var env payloadEnvelope
+	if err := json.Unmarshal(raw, &env); err == nil && env.Type != "" {
+		t, ok := types[env.Type]
+		if !ok {
+			return nil, fmt.Errorf("simulation: snapshot payload type %q is not registered", env.Type)
+		}
+		v := reflect.New(t)
+		if err := json.Unmarshal(env.Data, v.Interface()); err != nil {
+			return nil, fmt.Errorf("simulation: decode payload %q: %w", env.Type, err)
+		}
+		return v.Elem().Interface(), nil
+	}
+	return json.RawMessage(raw), nil
+}
+
+func (q *EventQueue) snapshot(payloadTypes map[string]reflect.Type) (eventQueueState, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	st := eventQueueState{NextID: q.next, Seq: q.seq}
@@ -128,7 +177,7 @@ func (q *EventQueue) snapshot() (eventQueueState, error) {
 			Target:   e.Target,
 		}
 		if e.Payload != nil {
-			b, err := json.Marshal(e.Payload)
+			b, err := marshalPayload(e.Payload, payloadTypes)
 			if err != nil {
 				return eventQueueState{}, err
 			}
@@ -139,16 +188,16 @@ func (q *EventQueue) snapshot() (eventQueueState, error) {
 	return st, nil
 }
 
-func (q *EventQueue) restore(st eventQueueState) {
+func (q *EventQueue) restore(st eventQueueState, payloadTypes map[string]reflect.Type) error {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	q.h = q.h[:0]
 	q.next = st.NextID
 	q.seq = st.Seq
 	for _, es := range st.Events {
-		var payload any
-		if len(es.Payload) > 0 {
-			payload = json.RawMessage(es.Payload)
+		payload, err := unmarshalPayload(es.Payload, payloadTypes)
+		if err != nil {
+			return err
 		}
 		q.pushRaw(Event{
 			ID:       es.ID,
@@ -161,6 +210,7 @@ func (q *EventQueue) restore(st eventQueueState) {
 			Payload:  payload,
 		})
 	}
+	return nil
 }
 
 // Peek returns the next event to fire without removing it.
@@ -188,4 +238,14 @@ func (q *EventQueue) Len() int {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	return len(q.h)
+}
+
+// PeekAll returns a copy of all queued events ordered by their firing order,
+// without removing them.
+func (q *EventQueue) PeekAll() []Event {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	out := append([]Event(nil), q.h...)
+	sort.Slice(out, func(i, j int) bool { return eventLess(out[i], out[j]) })
+	return out
 }

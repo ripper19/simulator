@@ -1,0 +1,3 @@
+DROP TABLE IF EXISTS snapshots;
+DROP TABLE IF EXISTS simulations;
+DROP TABLE IF EXISTS models;

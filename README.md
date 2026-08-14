@@ -4,12 +4,13 @@ An open, general-purpose distributed simulation runtime written in Go for
 executing deterministic, extensible simulations locally or across a scalable
 worker cluster.
 
-> **Status: Phase 4** — core engine (entities, SoA components, events, clock,
+> **Status: Phase 7** — core engine (entities, SoA components, events, clock,
 > deterministic randomness, and the simulation runtime), the discrete-event
-> engine (priority queue, immediate/delayed/prioritized scheduling), deterministic
-> parallel execution (`System` abstraction with dependency ordering and sharded
-> workers), and versioned, checksummed snapshots with deterministic restore.
-> Later phases add persistence, REST API, distributed workers, and observability.
+> engine, deterministic parallel execution, versioned snapshots with restore,
+> PostgreSQL persistence (pgx + sqlc, migrations, model registry), the REST API
+> + `sim` CLI, and distributed workers (RabbitMQ broker + Redis coordination,
+> jobs with retry/backoff/DLQ/idempotency). Later phases add observability and
+> auth.
 
 ## What this is
 
@@ -100,6 +101,66 @@ with a SHA-256 checksum for integrity. `World.Snapshot()` captures state;
 and model/seed match). Restore is deterministic: snapshotting mid-run and
 continuing — in place or into a fresh simulation — reproduces the uninterrupted
 run (see `examples/counter/snapshot_test.go`).
+
+## Persistence
+
+Durable state (model registry, simulations, snapshots) is stored in PostgreSQL
+via `pgx` + `sqlc` (no ORM), with embedded SQL migrations. The model registry
+supports multiple versions so a simulation pins the exact model version it ran
+with.
+
+```sh
+export DATABASE_URL=postgres://simulator:simulator_dev_pw@127.0.0.1:5432/simulator?sslmode=disable
+go run ./cmd/migrate           # apply migrations
+go run ./cmd/migrate -down 1   # roll back one migration
+```
+
+Integration tests against a live PostgreSQL are run when `DATABASE_URL` is set
+(each test is isolated in its own throwaway schema):
+
+```sh
+DATABASE_URL=... go test ./...
+```
+
+## API & CLI
+
+The platform exposes a REST API (`cmd/api`, chi) for the model registry and
+the full simulation lifecycle, plus a `sim` CLI (`cmd/cli`) that drives it over
+HTTP. See `docs/api/openapi.yaml` for the endpoint reference.
+
+```sh
+export DATABASE_URL=postgres://simulator:simulator_dev_pw@127.0.0.1:5432/simulator?sslmode=disable
+go run ./cmd/api                       # start the API on :8080
+go run ./cmd/cli models                # list models
+go run ./cmd/cli create --model counter --seed 42 --n 1000
+go run ./cmd/cli start <id>
+go run ./cmd/cli status <id>
+go run ./cmd/cli stop <id>
+go run ./cmd/cli snapshot <id>
+```
+
+## Distributed workers
+
+Simulation jobs are dispatched to workers over a message broker (RabbitMQ
+behind a `Broker` interface; an in-memory broker is available for local dev and
+tests), with Redis used for transient coordination (worker heartbeats,
+idempotency claims). Workers register, heartbeat, consume jobs, execute the
+same compiled-in models in-process, and publish results. Jobs support retries
+with exponential backoff, dead-lettering, and idempotent (at-most-once)
+execution.
+
+```sh
+# worker (RabbitMQ + Redis)
+BROKER=rabbitmq AMQP_URL=amqp://guest:guest@127.0.0.1:5672/ \
+REDIS_ADDR=127.0.0.1:6379 go run ./cmd/worker
+
+# or memory broker (no services needed)
+go run ./cmd/worker
+```
+
+See `internal/broker`, `internal/queue`, `internal/workers`, and
+`internal/coord`. The same model runs unchanged in-process (P6 API), as a local
+worker, or across a worker cluster.
 
 ## Verification
 

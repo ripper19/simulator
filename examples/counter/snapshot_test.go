@@ -3,6 +3,9 @@ package counter
 import (
 	"context"
 	"testing"
+
+	"github.com/ripper19/simulator/pkg/model"
+	"github.com/ripper19/simulator/pkg/simulation"
 )
 
 // TestSnapshotRestoreContinueDeterministic verifies that snapshotting a
@@ -47,5 +50,38 @@ func TestSnapshotRestoreContinueDeterministic(t *testing.T) {
 	}
 	if fp := mr.Fingerprint(rest.World()); fp != fpBase {
 		t.Fatalf("restore+continue diverged: %d != %d", fp, fpBase)
+	}
+}
+
+// TestSnapshotCapturesModelConfig verifies the model's own configuration
+// (N, IncrementMax) is captured in and restored from a snapshot.
+func TestSnapshotCapturesModelConfig(t *testing.T) {
+	m := &CounterWorld{N: 123, IncrementMax: 777}
+	sim, err := simulation.New(context.Background(), simulation.Config{
+		ID: "c", Seed: 5, Mode: model.ModeTick,
+	}, m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap, err := sim.Snapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snap.ModelConfig) == 0 {
+		t.Fatal("model config not captured in snapshot")
+	}
+
+	m2 := &CounterWorld{N: 1, IncrementMax: 1}
+	sim2, err := simulation.New(context.Background(), simulation.Config{
+		ID: "c", Seed: 5, Mode: model.ModeTick,
+	}, m2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sim2.Restore(snap); err != nil {
+		t.Fatal(err)
+	}
+	if m2.N != 123 || m2.IncrementMax != 777 {
+		t.Fatalf("model config not restored: N=%d IncrementMax=%d", m2.N, m2.IncrementMax)
 	}
 }

@@ -2,6 +2,8 @@ package simulation
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"sync"
 	"sync/atomic"
 
@@ -80,19 +82,51 @@ func (s *Simulation) Err() error {
 	return s.err
 }
 
-// Ticks returns the number of completed steps (ticks for tick-mode models).
+// Ticks returns the number of completed steps (ticks for tick-mode models). It
+// counts steps within the current run session; it is reset at the start of each
+// Run/RunN/Start and is not cumulative across runs.
 func (s *Simulation) Ticks() uint64 { return s.steps.Load() }
 
 // Config returns the simulation configuration.
 func (s *Simulation) Config() Config { return s.cfg }
 
-// Snapshot captures the current simulation state.
+// Snapshot captures the current simulation state, including the model's own
+// configuration (when the model implements SnapshotModel). It returns an error
+// if the simulation is currently running, so a snapshot is never taken mid-tick
+// (which would otherwise be torn across the world's internal structures).
 func (s *Simulation) Snapshot() (*Snapshot, error) {
-	return s.world.Snapshot()
+	s.mu.Lock()
+	if s.state == StateRunning {
+		s.mu.Unlock()
+		return nil, ErrAlreadyRunning
+	}
+	s.mu.Unlock()
+
+	snap, err := s.world.Snapshot()
+	if err != nil {
+		return nil, err
+	}
+	if m, ok := s.model.(SnapshotModel); ok {
+		cfg := m.SnapshotConfig()
+		if cfg != nil {
+			raw, err := json.Marshal(cfg)
+			if err != nil {
+				return nil, fmt.Errorf("simulation: snapshot model config: %w", err)
+			}
+			snap.ModelConfig = raw
+			checksum, err := snap.computeChecksum()
+			if err != nil {
+				return nil, err
+			}
+			snap.Checksum = checksum
+		}
+	}
+	return snap, nil
 }
 
-// Restore overwrites the simulation state from a snapshot. It returns an error
-// if the simulation is currently running.
+// Restore overwrites the simulation state from a snapshot, including the
+// model's configuration when present and the model implements SnapshotModel.
+// It returns an error if the simulation is currently running.
 func (s *Simulation) Restore(snap *Snapshot) error {
 	s.mu.Lock()
 	if s.state == StateRunning {
@@ -100,7 +134,16 @@ func (s *Simulation) Restore(snap *Snapshot) error {
 		return ErrAlreadyRunning
 	}
 	s.mu.Unlock()
-	return s.world.Restore(snap)
+
+	if err := s.world.Restore(snap); err != nil {
+		return err
+	}
+	if m, ok := s.model.(SnapshotModel); ok && len(snap.ModelConfig) > 0 {
+		if err := m.RestoreConfig(snap.ModelConfig); err != nil {
+			return fmt.Errorf("simulation: restore model config: %w", err)
+		}
+	}
+	return nil
 }
 
 // Run executes the simulation to completion and blocks until it finishes.
@@ -262,14 +305,34 @@ func (s *Simulation) defaultLimit() func() bool {
 	}
 }
 
-// run is the shared execution loop. limit, if non-nil, is consulted after each
+// run is the shared execution loop. limit, if non-nil, is consulted before each
 // step. The run terminates on error, on limit, on Stop/cancellation, or (in
-// event mode) when no events remain.
-func (s *Simulation) run(ctx context.Context, limit func() bool, done chan struct{}) error {
+// event mode) when no events remain. Deferred finalization guarantees cleanup
+// (cancel + close(done)) even if the model panics, and converts a panic into a
+// failed state so Wait() always returns.
+func (s *Simulation) run(ctx context.Context, limit func() bool, done chan struct{}) (runErr error) {
 	runCtx, cancel := context.WithCancel(ctx)
 	s.mu.Lock()
 	s.cancel = cancel
 	s.mu.Unlock()
+
+	defer func() {
+		if r := recover(); r != nil {
+			runErr = fmt.Errorf("simulation: model panic: %v", r)
+		}
+		s.mu.Lock()
+		if runErr != nil {
+			s.state = StateFailed
+			s.err = runErr
+			s.cond.Broadcast()
+		} else if s.state == StateRunning {
+			s.state = StateCompleted
+		}
+		s.cancel = nil
+		s.mu.Unlock()
+		cancel()
+		close(done)
+	}()
 
 	// Watcher: propagate cancellation of the run context into a clean stop so
 	// a paused loop also wakes up.
@@ -283,7 +346,6 @@ func (s *Simulation) run(ctx context.Context, limit func() bool, done chan struc
 		s.mu.Unlock()
 	}()
 
-	var runErr error
 	for {
 		s.mu.Lock()
 		for s.state == StatePaused {
@@ -306,6 +368,18 @@ func (s *Simulation) run(ctx context.Context, limit func() bool, done chan struc
 
 		more, err := s.exec.step(runCtx, s.world)
 		if err != nil {
+			if runCtx.Err() != nil {
+				// The run context was cancelled (Stop or external cancellation)
+				// while a step was in flight; the scheduler surfaced the
+				// cancellation as an error. This is a stop, not a model failure.
+				s.mu.Lock()
+				if s.state == StateRunning || s.state == StatePaused {
+					s.state = StateStopped
+					s.cond.Broadcast()
+				}
+				s.mu.Unlock()
+				break
+			}
 			runErr = err
 			s.mu.Lock()
 			s.state = StateFailed
@@ -326,15 +400,5 @@ func (s *Simulation) run(ctx context.Context, limit func() bool, done chan struc
 
 		s.steps.Add(1)
 	}
-
-	s.mu.Lock()
-	if s.state == StateRunning {
-		s.state = StateCompleted
-	}
-	s.cancel = nil
-	s.mu.Unlock()
-
-	cancel()
-	close(done)
-	return runErr
+	return
 }

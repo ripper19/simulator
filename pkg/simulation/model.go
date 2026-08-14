@@ -2,6 +2,7 @@ package simulation
 
 import (
 	"context"
+	"encoding/json"
 
 	"github.com/ripper19/simulator/pkg/model"
 )
@@ -34,4 +35,23 @@ type TickModel interface {
 type EventModel interface {
 	Model
 	HandleEvent(ctx context.Context, w *World, e Event) error
+}
+
+// SnapshotModel is implemented by models that wish to include their own
+// configuration in snapshots, so a restore can reconstruct identical behavior
+// without the caller re-supplying configuration.
+type SnapshotModel interface {
+	// SnapshotConfig returns the model's configuration as a JSON-marshalable
+	// value (exported fields).
+	SnapshotConfig() any
+	// RestoreConfig applies a previously snapshotted configuration, given as the
+	// raw JSON produced by marshaling SnapshotConfig's result.
+	RestoreConfig(raw json.RawMessage) error
+}
+
+// ConfigurableModel is implemented by models that accept a JSON configuration
+// before Initialize (for example, from a simulation-creation request).
+type ConfigurableModel interface {
+	// Configure applies the model's configuration from raw JSON.
+	Configure(raw json.RawMessage) error
 }
