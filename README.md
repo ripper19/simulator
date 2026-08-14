@@ -4,12 +4,12 @@ An open, general-purpose distributed simulation runtime written in Go for
 executing deterministic, extensible simulations locally or across a scalable
 worker cluster.
 
-> **Status: Phase 4** — core engine (entities, SoA components, events, clock,
+> **Status: Phase 5** — core engine (entities, SoA components, events, clock,
 > deterministic randomness, and the simulation runtime), the discrete-event
-> engine (priority queue, immediate/delayed/prioritized scheduling), deterministic
-> parallel execution (`System` abstraction with dependency ordering and sharded
-> workers), and versioned, checksummed snapshots with deterministic restore.
-> Later phases add persistence, REST API, distributed workers, and observability.
+> engine, deterministic parallel execution, versioned snapshots with restore,
+> and PostgreSQL persistence (pgx + sqlc, migrations, model registry with
+> versioning). Later phases add the REST API, distributed workers, and
+> observability.
 
 ## What this is
 
@@ -100,6 +100,26 @@ with a SHA-256 checksum for integrity. `World.Snapshot()` captures state;
 and model/seed match). Restore is deterministic: snapshotting mid-run and
 continuing — in place or into a fresh simulation — reproduces the uninterrupted
 run (see `examples/counter/snapshot_test.go`).
+
+## Persistence
+
+Durable state (model registry, simulations, snapshots) is stored in PostgreSQL
+via `pgx` + `sqlc` (no ORM), with embedded SQL migrations. The model registry
+supports multiple versions so a simulation pins the exact model version it ran
+with.
+
+```sh
+export DATABASE_URL=postgres://simulator:simulator_dev_pw@127.0.0.1:5432/simulator?sslmode=disable
+go run ./cmd/migrate           # apply migrations
+go run ./cmd/migrate -down 1   # roll back one migration
+```
+
+Integration tests against a live PostgreSQL are run when `DATABASE_URL` is set
+(each test is isolated in its own throwaway schema):
+
+```sh
+DATABASE_URL=... go test ./...
+```
 
 ## Verification
 
