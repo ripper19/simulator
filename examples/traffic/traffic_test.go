@@ -11,13 +11,18 @@ import (
 
 func runCfg(t *testing.T, cfg Config, ticks uint64) (*simulation.Simulation, *Traffic) {
 	t.Helper()
+	return runSeed(t, 42, cfg, ticks)
+}
+
+func runSeed(t *testing.T, seed uint64, cfg Config, ticks uint64) (*simulation.Simulation, *Traffic) {
+	t.Helper()
 	m := &Traffic{}
 	b, _ := json.Marshal(cfg)
 	if err := m.Configure(b); err != nil {
 		t.Fatal(err)
 	}
 	sim, err := simulation.New(context.Background(), simulation.Config{
-		ID: "traffic", Seed: 42, Mode: model.ModeTick, MaxTicks: ticks, Workers: 4,
+		ID: "traffic", Seed: seed, Mode: model.ModeTick, MaxTicks: ticks, Workers: 4,
 	}, m)
 	if err != nil {
 		t.Fatal(err)
@@ -102,9 +107,23 @@ func TestPluggableAlgorithm(t *testing.T) {
 	if m.Metrics()["throughput"] != 20 {
 		t.Fatalf("throughput %v, want 20", m.Metrics()["throughput"])
 	}
-	// With no red lights, no vehicle ever waits.
-	if m.Metrics()["avg_wait"] != 0 {
-		t.Fatalf("avg_wait %v, want 0 with always-green lights", m.Metrics()["avg_wait"])
+	// always-green avoids red-light stops, so it must beat fixed timing on wait.
+	_, fixed := runCfg(t, Config{Vehicles: 20, Intersections: 3, Spacing: 2, Algorithm: "fixed", GreenTicks: 3, RedTicks: 3}, 500)
+	if m.Metrics()["avg_wait"] >= fixed.Metrics()["avg_wait"] {
+		t.Fatalf("always-green avg_wait %v should be < fixed %v",
+			m.Metrics()["avg_wait"], fixed.Metrics()["avg_wait"])
+	}
+}
+
+// Showcase property: the seed meaningfully changes congestion (via per-vehicle
+// speeds), so circumstances differ across seeds.
+func TestSeedChangesOutcome(t *testing.T) {
+	cfg := Config{Vehicles: 80, Intersections: 5, Spacing: 3, Algorithm: "fixed", GreenTicks: 5, RedTicks: 5}
+	_, a := runSeed(t, 42, cfg, 2000)
+	_, b := runSeed(t, 43, cfg, 2000)
+	ma, mb := a.Metrics(), b.Metrics()
+	if ma["peak_queue"] == mb["peak_queue"] && ma["avg_wait"] == mb["avg_wait"] {
+		t.Fatalf("different seeds should change congestion: %v vs %v", ma, mb)
 	}
 }
 

@@ -144,11 +144,12 @@ type Light struct {
 	Queue int
 }
 
-// Vehicle travels a route edge-by-edge.
+// Vehicle travels a route edge-by-edge at a per-vehicle speed.
 type Vehicle struct {
-	Edge int // index into route; current edge is route[Edge] -> route[Edge+1]
-	Pos  int // cells traveled on the edge; -ve = before entry, len = at the node
-	Wait int
+	Edge  int // index into route; current edge is route[Edge] -> route[Edge+1]
+	Pos   int // cells traveled on the edge; -ve = before entry, len = at the node
+	Wait  int
+	Speed int // cells advanced per tick (seed-drawn)
 }
 
 // Traffic runs the scenario.
@@ -194,6 +195,13 @@ func (m *Traffic) Configure(raw json.RawMessage) error {
 	return nil
 }
 
+// SetAlgorithm overrides the configured algorithm with a custom instance
+// (in-process injection; call before New). The name-based registry remains
+// available via RegisterAlgorithm for compiled-in selection through config.
+func (m *Traffic) SetAlgorithm(alg LightAlgorithm) {
+	m.algorithm = alg
+}
+
 // Initialize builds the network, lights, and vehicles.
 func (m *Traffic) Initialize(ctx context.Context, w *simulation.World) error {
 	if m.cfg.Vehicles == 0 {
@@ -216,7 +224,8 @@ func (m *Traffic) Initialize(ctx context.Context, w *simulation.World) error {
 		if m.cfg.SeedJitter > 0 {
 			jitter = int(m.rng.Float64() * m.cfg.SeedJitter * float64(m.edgeLen[0]))
 		}
-		m.vehCol.Set(w.Entities.Create(), Vehicle{Edge: 0, Pos: -i - 1 - jitter})
+		speed := 1 + int(m.rng.Uint64n(3)) // 1..3, seed-drawn
+		m.vehCol.Set(w.Entities.Create(), Vehicle{Edge: 0, Pos: -i - 1 - jitter, Speed: speed})
 	}
 	return nil
 }
@@ -252,8 +261,11 @@ func (m *Traffic) buildNetwork() {
 	}
 }
 
-// resolveAlgorithm picks the configured light policy.
+// resolveAlgorithm picks the configured light policy (or keeps an injected one).
 func (m *Traffic) resolveAlgorithm() {
+	if m.algorithm != nil {
+		return
+	}
 	algorithmRegistry.mu.RLock()
 	if alg, ok := algorithmRegistry.algs[m.cfg.Algorithm]; ok {
 		m.algorithm = alg
@@ -334,54 +346,58 @@ func (s *movementSystem) Run(ctx context.Context, w *simulation.World, shard []s
 		return vs[i].v.Pos > vs[j].v.Pos
 	})
 
-	occ := make(map[int]map[int]bool)
+	occ := make(map[int]map[int]bool, len(m.edgeLen))
+	for e := range m.edgeLen {
+		occ[e] = map[int]bool{}
+	}
 	for _, it := range vs {
 		if it.v.Pos >= 0 && it.v.Pos < m.edgeLen[it.v.Edge] {
-			if occ[it.v.Edge] == nil {
-				occ[it.v.Edge] = map[int]bool{}
-			}
 			occ[it.v.Edge][it.v.Pos] = true
 		}
 	}
 
 	var completed, totalWait, queueSum int
 	for _, it := range vs {
-		e := it.v.Edge
-		l := m.edgeLen[e]
-		dest := m.route[e+1]
-		p := it.v.Pos
-
 		blocked := false
 		finished := false
-		switch {
-		case p < 0:
-			it.v.Pos = p + 1
-		case p == l:
-			if e == len(m.route)-2 {
-				finished = true
-			} else if !m.lightGreen(dest) {
-				blocked = true
-			} else if occ[e+1] != nil && occ[e+1][0] {
-				blocked = true
-			} else {
-				it.v.Edge = e + 1
-				it.v.Pos = 0
-				if occ[e+1] == nil {
-					occ[e+1] = map[int]bool{}
+		blockDest := ""
+		for step := 0; step < it.v.Speed && !blocked && !finished; step++ {
+			e := it.v.Edge
+			l := m.edgeLen[e]
+			dest := m.route[e+1]
+			p := it.v.Pos
+
+			switch {
+			case p < 0:
+				it.v.Pos = p + 1
+			case p == l:
+				if e == len(m.route)-2 {
+					finished = true
+				} else if !m.lightGreen(dest) || (occ[e+1] != nil && occ[e+1][0]) {
+					blocked = true
+					blockDest = dest
+				} else {
+					it.v.Edge = e + 1
+					it.v.Pos = 0
+					if occ[e+1] == nil {
+						occ[e+1] = map[int]bool{}
+					}
+					occ[e+1][0] = true
 				}
-				occ[e+1][0] = true
-			}
-		default: // 0 <= p < l
-			target := p + 1
-			if target == l {
-				it.v.Pos = target
-				delete(occ[e], p)
-			} else if occ[e][target] {
-				blocked = true
-			} else {
-				it.v.Pos = target
-				delete(occ[e], p)
-				occ[e][target] = true
+			default:
+				target := p + 1
+				if occ[e][target] {
+					blocked = true
+					blockDest = dest
+				} else {
+					delete(occ[e], p)
+					it.v.Pos = target
+					if target < l {
+						occ[e][target] = true
+					} else {
+						break // reached the node; crossing is a separate tick
+					}
+				}
 			}
 		}
 
@@ -395,7 +411,7 @@ func (s *movementSystem) Run(ctx context.Context, w *simulation.World, shard []s
 		if blocked {
 			it.v.Wait++
 			queueSum++
-			m.bumpQueue(dest)
+			m.bumpQueue(blockDest)
 		}
 		m.vehCol.Set(it.id, it.v)
 	}
