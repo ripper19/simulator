@@ -16,40 +16,40 @@ import (
 
 // ModelInfo is a durable model-registry entry.
 type ModelInfo struct {
-	ID            string
-	Name          string
-	Version       string
-	Description   string
-	Mode          string
-	ConfigSchema  json.RawMessage
-	RuntimeCompat string
-	Author        string
-	CreatedAt     time.Time
+	ID            string          `json:"id"`
+	Name          string          `json:"name"`
+	Version       string          `json:"version"`
+	Description   string          `json:"description"`
+	Mode          string          `json:"mode"`
+	ConfigSchema  json.RawMessage `json:"config_schema,omitempty"`
+	RuntimeCompat string          `json:"runtime_compat,omitempty"`
+	Author        string          `json:"author,omitempty"`
+	CreatedAt     time.Time       `json:"created_at"`
 }
 
 // SimulationInfo is a durable simulation record.
 type SimulationInfo struct {
-	ID           string
-	ModelID      string
-	ModelVersion string
-	Seed         int64
-	Mode         string
-	Status       string
-	Config       json.RawMessage
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
-	CompletedAt  *time.Time
+	ID           string          `json:"id"`
+	ModelID      string          `json:"model_id"`
+	ModelVersion string          `json:"model_version"`
+	Seed         int64           `json:"seed"`
+	Mode         string          `json:"mode"`
+	Status       string          `json:"status"`
+	Config       json.RawMessage `json:"config,omitempty"`
+	CreatedAt    time.Time       `json:"created_at"`
+	UpdatedAt    time.Time       `json:"updated_at"`
+	CompletedAt  *time.Time      `json:"completed_at,omitempty"`
 }
 
 // SnapshotInfo is a durable snapshot record.
 type SnapshotInfo struct {
-	ID            string
-	SimulationID  string
-	SchemaVersion int32
-	EngineVersion string
-	Data          json.RawMessage
-	Checksum      string
-	CreatedAt     time.Time
+	ID            string          `json:"id"`
+	SimulationID  string          `json:"simulation_id"`
+	SchemaVersion int32           `json:"schema_version"`
+	EngineVersion string          `json:"engine_version"`
+	Data          json.RawMessage `json:"data"`
+	Checksum      string          `json:"checksum"`
+	CreatedAt     time.Time       `json:"created_at"`
 }
 
 // Store is the persistence layer, backed by a pgx connection pool and the

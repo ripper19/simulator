@@ -48,3 +48,10 @@ type SnapshotModel interface {
 	// raw JSON produced by marshaling SnapshotConfig's result.
 	RestoreConfig(raw json.RawMessage) error
 }
+
+// ConfigurableModel is implemented by models that accept a JSON configuration
+// before Initialize (for example, from a simulation-creation request).
+type ConfigurableModel interface {
+	// Configure applies the model's configuration from raw JSON.
+	Configure(raw json.RawMessage) error
+}

@@ -4,12 +4,12 @@ An open, general-purpose distributed simulation runtime written in Go for
 executing deterministic, extensible simulations locally or across a scalable
 worker cluster.
 
-> **Status: Phase 5** — core engine (entities, SoA components, events, clock,
+> **Status: Phase 6** — core engine (entities, SoA components, events, clock,
 > deterministic randomness, and the simulation runtime), the discrete-event
 > engine, deterministic parallel execution, versioned snapshots with restore,
-> and PostgreSQL persistence (pgx + sqlc, migrations, model registry with
-> versioning). Later phases add the REST API, distributed workers, and
-> observability.
+> PostgreSQL persistence (pgx + sqlc, migrations, model registry), and the REST
+> API + `sim` CLI. Later phases add distributed workers, observability, and
+> auth.
 
 ## What this is
 
@@ -119,6 +119,23 @@ Integration tests against a live PostgreSQL are run when `DATABASE_URL` is set
 
 ```sh
 DATABASE_URL=... go test ./...
+```
+
+## API & CLI
+
+The platform exposes a REST API (`cmd/api`, chi) for the model registry and
+the full simulation lifecycle, plus a `sim` CLI (`cmd/cli`) that drives it over
+HTTP. See `docs/api/openapi.yaml` for the endpoint reference.
+
+```sh
+export DATABASE_URL=postgres://simulator:simulator_dev_pw@127.0.0.1:5432/simulator?sslmode=disable
+go run ./cmd/api                       # start the API on :8080
+go run ./cmd/cli models                # list models
+go run ./cmd/cli create --model counter --seed 42 --n 1000
+go run ./cmd/cli start <id>
+go run ./cmd/cli status <id>
+go run ./cmd/cli stop <id>
+go run ./cmd/cli snapshot <id>
 ```
 
 ## Verification

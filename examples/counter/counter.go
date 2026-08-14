@@ -89,6 +89,18 @@ func (m *CounterWorld) SnapshotConfig() any {
 
 // RestoreConfig implements simulation.SnapshotModel.
 func (m *CounterWorld) RestoreConfig(raw json.RawMessage) error {
+	return m.applyConfig(raw)
+}
+
+// Configure implements simulation.ConfigurableModel.
+func (m *CounterWorld) Configure(raw json.RawMessage) error {
+	return m.applyConfig(raw)
+}
+
+func (m *CounterWorld) applyConfig(raw json.RawMessage) error {
+	if len(raw) == 0 {
+		return nil
+	}
 	var c counterConfig
 	if err := json.Unmarshal(raw, &c); err != nil {
 		return err

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"sort"
 	"sync"
 )
 
@@ -237,4 +238,14 @@ func (q *EventQueue) Len() int {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	return len(q.h)
+}
+
+// PeekAll returns a copy of all queued events ordered by their firing order,
+// without removing them.
+func (q *EventQueue) PeekAll() []Event {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	out := append([]Event(nil), q.h...)
+	sort.Slice(out, func(i, j int) bool { return eventLess(out[i], out[j]) })
+	return out
 }
